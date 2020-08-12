@@ -1,13 +1,26 @@
-/*!
- * Copyright 2020 Rory Mitchell
+/*
+ * Copyright (c) 2020, NVIDIA CORPORATION.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
-#include <gtest/gtest.h>
 #include <GPUTreeShap/gpu_treeshap.h>
+#include <gtest/gtest.h>
 #include <limits>
 #include <vector>
 
-using namespace gpu_treeshap;
+using namespace gpu_treeshap;  // NOLINT
+
 class DenseDatasetWrapper {
   const float* data;
   int num_rows;
@@ -95,7 +108,7 @@ __device__ bool FloatApproximatelyEqual(float a, float b) {
 // Expose pweight for testing
 class TestGroupPath : public gpu_treeshap::detail::GroupPath {
  public:
-  __device__ TestGroupPath(gpu_treeshap::detail::ContiguousGroup& g,
+  __device__ TestGroupPath(const gpu_treeshap::detail::ContiguousGroup& g,
                            float zero_fraction, float one_fraction)
       : gpu_treeshap::detail::GroupPath(g, zero_fraction, one_fraction) {}
   using gpu_treeshap::detail::GroupPath::pweight_;
@@ -106,12 +119,16 @@ template <typename DatasetT>
 __global__ void TestExtendKernel(
     DatasetT X, size_t num_path_elements,
     const gpu_treeshap::PathElement* path_elements) {
-  cg::thread_block block = cg::this_thread_block();
-  auto group = cg::tiled_partition<32, cg::thread_block>(block);
+  cooperative_groups::thread_block block =
+      cooperative_groups::this_thread_block();
+  auto group =
+      cooperative_groups::tiled_partition<32, cooperative_groups::thread_block>(
+          block);
   if (group.thread_rank() >= num_path_elements) return;
 
   // Test first training instance
-  cg::coalesced_group active_group = cg::coalesced_threads();
+  cooperative_groups::coalesced_group active_group =
+      cooperative_groups::coalesced_threads();
   gpu_treeshap::PathElement e = path_elements[active_group.thread_rank()];
   float one_fraction = gpu_treeshap::detail::GetOneFraction(e, X, 0);
   float zero_fraction = e.zero_fraction;
@@ -238,10 +255,14 @@ template <typename DatasetT>
 __global__ void TestExtendMultipleKernel(
     DatasetT X, size_t n_first, size_t n_second,
     const gpu_treeshap::PathElement* path_elements) {
-  cg::thread_block block = cg::this_thread_block();
-  auto warp = cg::tiled_partition<32, cg::thread_block>(block);
+  cooperative_groups::thread_block block =
+      cooperative_groups::this_thread_block();
+  auto warp =
+      cooperative_groups::tiled_partition<32, cooperative_groups::thread_block>(
+          block);
   if (warp.thread_rank() >= n_first + n_second) return;
-  cg::coalesced_group active_group = cg::coalesced_threads();
+  cooperative_groups::coalesced_group active_group =
+      cooperative_groups::coalesced_threads();
   int label = warp.thread_rank() >= n_first;
   auto labeled_group = gpu_treeshap::detail::active_labeled_partition(label);
   gpu_treeshap::PathElement e = path_elements[warp.thread_rank()];
@@ -345,8 +366,11 @@ TEST(GPUTreeShap, ExtendMultiplePaths) {
 }
 
 __global__ void TestActiveLabeledPartition() {
-  cg::thread_block block = cg::this_thread_block();
-  auto warp = cg::tiled_partition<32, cg::thread_block>(block);
+  cooperative_groups::thread_block block =
+      cooperative_groups::this_thread_block();
+  auto warp =
+      cooperative_groups::tiled_partition<32, cooperative_groups::thread_block>(
+          block);
   int label = warp.thread_rank() < 5 ? 3 : 6;
   auto labelled_partition =
       gpu_treeshap::detail::active_labeled_partition(label);
@@ -393,9 +417,9 @@ TEST(GPUTreeShap, FFDBinPacking) {
   counts[1] = 2;
   counts[2] = 1;
   auto bin_packing = gpu_treeshap::detail::FFDBinPacking(counts, 3);
-  EXPECT_EQ(bin_packing[0], 0);
-  EXPECT_EQ(bin_packing[1], 1);
-  EXPECT_EQ(bin_packing[2], 0);
+  EXPECT_EQ(bin_packing[0], 0u);
+  EXPECT_EQ(bin_packing[1], 1u);
+  EXPECT_EQ(bin_packing[2], 0u);
 }
 
 __global__ void TestContiguousGroup() {

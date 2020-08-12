@@ -1,9 +1,28 @@
+/*
+ * Copyright (c) 2020, NVIDIA CORPORATION.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 #include <cooperative_groups.h>
 #include <thrust/device_allocator.h>
 #include <thrust/device_vector.h>
-
-namespace cg = cooperative_groups;
+#include <algorithm>
+#include <functional>
+#include <map>
+#include <utility>
+#include <vector>
 
 namespace gpu_treeshap {
 struct PathElement {
@@ -147,7 +166,7 @@ class GroupPath {
     // new_zero_fraction * max(unique_depth_ - rank, 0llu) * inv_unique_depth;
     pweight_ =
         __fmul_rn(__fmul_rn(pweight_, new_zero_fraction),
-                  __fmul_rn(max(unique_depth_ - rank, 0llu), inv_unique_depth));
+                  __fmul_rn(max(unique_depth_ - rank, 0lu), inv_unique_depth));
 
     // pweight_  += new_one_fraction * left_pweight * rank * inv_unique_depth;
     pweight_ = __fmaf_rn(__fmul_rn(new_one_fraction, left_pweight),
@@ -188,8 +207,11 @@ __global__ void ShapKernel(DatasetT X, size_t warps_per_row,
                            float* phis) {
   // Partition work
   // Each warp processes a training instance applied to a path
-  cg::thread_block block = cg::this_thread_block();
-  auto warp = cg::tiled_partition<32, cg::thread_block>(block);
+  cooperative_groups::thread_block block =
+      cooperative_groups::this_thread_block();
+  auto warp =
+      cooperative_groups::tiled_partition<32, cooperative_groups::thread_block>(
+          block);
   size_t tid = block.size() * block.group_index().x + block.thread_rank();
   size_t warp_rank = tid / warp.size();
   if (warp_rank >= warps_per_row * X.NumRows()) return;
@@ -317,8 +339,8 @@ inline std::vector<PathElement> SortPaths(
   return sorted_paths;
 }
 
-inline std::map<size_t, size_t> FFDBinPacking(std::map<size_t, int>& counts,
-                                              int bin_limit = 32) {
+inline std::map<size_t, size_t> FFDBinPacking(
+    const std::map<size_t, int>& counts, int bin_limit = 32) {
   using kv = std::pair<size_t, int>;
   std::vector<kv> path_lengths(counts.begin(), counts.end());
   std::sort(path_lengths.begin(), path_lengths.end(),
