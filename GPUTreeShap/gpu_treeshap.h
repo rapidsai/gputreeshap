@@ -164,9 +164,9 @@ class GroupPath {
     // We use max(x,0) to avoid using a branch
     // pweight_ *=
     // new_zero_fraction * max(unique_depth_ - rank, 0llu) * inv_unique_depth;
-    pweight_ =
-        __fmul_rn(__fmul_rn(pweight_, new_zero_fraction),
-                  __fmul_rn(max(unique_depth_ - rank, 0lu), inv_unique_depth));
+    pweight_ = __fmul_rn(
+        __fmul_rn(pweight_, new_zero_fraction),
+        __fmul_rn(max(unique_depth_ - rank, size_t(0)), inv_unique_depth));
 
     // pweight_  += new_one_fraction * left_pweight * rank * inv_unique_depth;
     pweight_ = __fmaf_rn(__fmul_rn(new_one_fraction, left_pweight),
