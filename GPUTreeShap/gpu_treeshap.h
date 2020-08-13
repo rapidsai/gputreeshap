@@ -25,6 +25,7 @@
 #include <vector>
 
 namespace gpu_treeshap {
+/*! An element of a unique path through a decision tree. */
 struct PathElement {
   PathElement(size_t path_idx, int64_t feature_idx, int group,
               float feature_lower_bound, float feature_upper_bound,
@@ -42,13 +43,18 @@ struct PathElement {
 
   PathElement() = default;
 
-  size_t path_idx;      // Unique path index
-  int64_t feature_idx;  // Feature of this split, -1 indicates bias term
-  int group;            // Indicates class for multiclass problems
-  // Feature values >= lower and < upper flow down this path
+  /*! Unique path index. */
+  size_t path_idx;
+  /*! Feature of this split, -1 indicates bias term. */
+  int64_t feature_idx;
+  /*! Indicates class for multiclass problems. */
+  int group;
+  /*! Feature values >= lower and < upper flow down this path. */
   float feature_lower_bound;
   float feature_upper_bound;
-  bool is_missing_branch;  // Do missing values flow down this path?
+  /*! Do missing values flow down this path? */
+  bool is_missing_branch;
+  /*! Probability of following this path when feature_idx is not in the active set. */
   float zero_fraction;
   float v;  // Leaf weight at the end of the path
 };
@@ -370,8 +376,36 @@ inline std::map<size_t, size_t> FFDBinPacking(
 
 };  // namespace detail
 
-template <typename DeviceAllocatorT = thrust::device_allocator<int>,
-          typename DatasetT>
+/*!
+ * Compute feature contributions on the GPU given a set of unique paths through a tree ensemble
+ * and a dataset. Uses device memory proportional to the tree ensemble size.
+ *
+ * \tparam  DeviceAllocatorT  Optional thrust style allocator.
+ * \tparam  DatasetT  User-specified dataset container.
+ *
+ * \param           X           Thin wrapper over a dataset allocated in device memory. X should be
+ *                              trivially copyable as a kernel parameter (i.e. contain only pointers
+ *                              to actual data) and must implement the methods
+ *                              NumRows()/NumCols()/GetElement(size_t row_idx, size_t col_idx) as
+ *                              __device__ functions. GetElement may return NaN where the feature
+ *                              value is missing.
+ * \param           paths       Vector of paths, where separate paths are delineated by
+ *                              PathElement.path_idx. Each unique path should contain 1 root with
+ *                              feature_idx = -1 and zero_fraction = 1.0. The ordering of path
+ *                              elements inside a unique path does not matter - the result will be
+ *                              the same. Paths may contain duplicate features. See the PathElement
+ *                              class for more information.
+ * \param           num_groups  Number of output groups. In multiclass classification the algorithm
+ *                              outputs feature contributions per output class.
+ * \param [in,out]  phis_out    Device memory buffer for returning the feature contributions. Must
+ *                              be of size X.NumRows() * (X.NumCols() + 1) * num_groups. The last
+ *                              feature column contains the bias term. Feature contributions can be
+ *                              retrieved by phis_out[(row_idx * num_groups + group) * (X.NumCols() +
+ *                              1) + feature_idx]. Results are added to the input buffer without
+ *                              zeroing memory - do not pass uninitialised memory.
+ *
+ */
+template <typename DeviceAllocatorT = thrust::device_allocator<int>, typename DatasetT>
 void GPUTreeShap(DatasetT X, const std::vector<PathElement>& paths,
                  size_t num_groups, float* phis_out) {
   if (X.NumRows() == 0 || X.NumCols() == 0 || paths.empty()) return;
