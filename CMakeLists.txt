@@ -4,6 +4,7 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CUDA_STANDARD 14)
 
 option(BUILD_GTEST "Build google tests" OFF)
+option(BUILD_EXAMPLES "Build examples" OFF)
 
 # GPUTreeSHAP target is header-only
 add_library(GPUTreeShap INTERFACE)
@@ -24,5 +25,7 @@ if(BUILD_GTEST)
   add_custom_command(TARGET TestGPUTreeShap PRE_BUILD COMMAND cpplint ${GPUTreeShap_SOURCE_DIR}/GPUTreeShap/gpu_treeshap.h ${GPUTreeShap_SOURCE_DIR}/tests/test_gpu_treeshap.cu ${GPUTreeShap_SOURCE_DIR}/example/example.cu)
 endif()
 
-add_executable(GPUTreeShapExample example/example.cu)
-target_link_libraries(GPUTreeShapExample PRIVATE GPUTreeShap)
+if(BUILD_EXAMPLES)
+  add_executable(GPUTreeShapExample example/example.cu)
+  target_link_libraries(GPUTreeShapExample PRIVATE GPUTreeShap)
+endif()
