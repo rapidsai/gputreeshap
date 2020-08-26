@@ -218,7 +218,8 @@ __global__ void ShapKernel(DatasetT X, size_t warps_per_row,
   auto warp =
       cooperative_groups::tiled_partition<32, cooperative_groups::thread_block>(
           block);
-  size_t tid = block.size() * block.group_index().x + block.thread_rank();
+  size_t tid =
+      size_t(block.size()) * block.group_index().x + block.thread_rank();
   size_t warp_rank = tid / warp.size();
   if (warp_rank >= warps_per_row * X.NumRows()) return;
   size_t row_idx = warp_rank / warps_per_row;
