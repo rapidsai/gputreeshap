@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <vector>
+#include "../GPUTreeShap/gpu_treeshap.h"
 
 using namespace gpu_treeshap;  // NOLINT
 
@@ -411,15 +412,70 @@ TEST(GPUTreeShap, ActiveLabeledPartition) {
   EXPECT_EQ(cudaDeviceSynchronize(), 0);
 }
 
-TEST(GPUTreeShap, FFDBinPacking) {
+TEST(GPUTreeShap, BFDBinPacking) {
   std::map<size_t, int> counts;
   counts[0] = 2;
   counts[1] = 2;
   counts[2] = 1;
-  auto bin_packing = gpu_treeshap::detail::FFDBinPacking(counts, 3);
+  auto bin_packing = gpu_treeshap::detail::BFDBinPacking(counts, 3);
   EXPECT_EQ(bin_packing[0], 0u);
   EXPECT_EQ(bin_packing[1], 1u);
   EXPECT_EQ(bin_packing[2], 0u);
+
+  counts = std::map<size_t, int>();
+  counts[0] = 3;
+  counts[1] = 3;
+  counts[2] = 3;
+  counts[3] = 3;
+  counts[4] = 3;
+  counts[5] = 3;
+  counts[6] = 2;
+  counts[7] = 2;
+  counts[8] = 2;
+  counts[9] = 2;
+  counts[10] = 2;
+  counts[11] = 2;
+  bin_packing = gpu_treeshap::detail::BFDBinPacking(counts, 10);
+  EXPECT_EQ(bin_packing[0], 0u);
+  EXPECT_EQ(bin_packing[1], 0u);
+  EXPECT_EQ(bin_packing[2], 0u);
+  EXPECT_EQ(bin_packing[3], 1u);
+  EXPECT_EQ(bin_packing[4], 1u);
+  EXPECT_EQ(bin_packing[5], 1u);
+  EXPECT_EQ(bin_packing[6], 2u);
+  EXPECT_EQ(bin_packing[7], 2u);
+  EXPECT_EQ(bin_packing[8], 2u);
+  EXPECT_EQ(bin_packing[9], 2u);
+  EXPECT_EQ(bin_packing[10], 2u);
+  EXPECT_EQ(bin_packing[11], 3u);
+}
+
+TEST(GPUTreeShap, NFBinPacking) {
+  std::map<size_t, int> counts;
+  counts[0] = 3;
+  counts[1] = 3;
+  counts[2] = 1;
+  counts[3] = 2;
+  auto bin_packing = gpu_treeshap::detail::NFBinPacking(counts, 5);
+  EXPECT_EQ(bin_packing[0], 0u);
+  EXPECT_EQ(bin_packing[1], 1u);
+  EXPECT_EQ(bin_packing[2], 1u);
+  EXPECT_EQ(bin_packing[3], 2u);
+}
+
+TEST(GPUTreeShap, FFDBinPacking) {
+  std::map<size_t, int> counts;
+  counts[0] = 3;
+  counts[1] = 2;
+  counts[2] = 3;
+  counts[3] = 4;
+  counts[4] = 1;
+  auto bin_packing = gpu_treeshap::detail::FFDBinPacking(counts, 5);
+  EXPECT_EQ(bin_packing[0], 1u);
+  EXPECT_EQ(bin_packing[1], 1u);
+  EXPECT_EQ(bin_packing[2], 2u);
+  EXPECT_EQ(bin_packing[3], 0u);
+  EXPECT_EQ(bin_packing[4], 0u);
 }
 
 __global__ void TestContiguousGroup() {

@@ -23,6 +23,7 @@
 #include <map>
 #include <utility>
 #include <vector>
+#include <set>
 
 namespace gpu_treeshap {
 /*! An element of a unique path through a decision tree. */
@@ -54,7 +55,8 @@ struct PathElement {
   float feature_upper_bound;
   /*! Do missing values flow down this path? */
   bool is_missing_branch;
-  /*! Probability of following this path when feature_idx is not in the active set. */
+  /*! Probability of following this path when feature_idx is not in the active
+   * set. */
   float zero_fraction;
   float v;  // Leaf weight at the end of the path
 };
@@ -271,23 +273,23 @@ void ComputeShap(
       num_groups, phis);
 }
 
-inline std::vector<size_t> GetBinSegments(
-    const std::vector<PathElement>& paths,
-    const std::map<size_t, size_t>& bin_map) {
-  std::vector<size_t> sizes = {0};
-  auto previous = paths.front();
-  size_t size = 1;
-  for (auto i = 1ull; i < paths.size(); i++) {
-    auto& next = paths[i];
-    if (bin_map.at(next.path_idx) != bin_map.at(previous.path_idx)) {
-      sizes.push_back(size);
-    }
-    size++;
-    previous = next;
-  }
-  sizes.push_back(size);
-
-  return sizes;
+template <typename PathVectorT, typename SizeVectorT, typename DeviceAllocatorT>
+void GetBinSegmentsDevice(const PathVectorT& paths, const SizeVectorT& bin_map,
+                          SizeVectorT* bin_segments) {
+  bin_segments->resize(bin_map.size() + 1);
+  auto counting = thrust::make_counting_iterator(0llu);
+  auto d_paths = paths.data().get();
+  auto d_bin_segments = bin_segments->data().get();
+  auto d_bin_map = bin_map.data();
+  thrust::for_each_n(counting, paths.size(), [=] __device__(size_t idx) {
+    auto path_idx = d_paths[idx].path_idx;
+    atomicAdd(reinterpret_cast<unsigned long long*>(d_bin_segments) +  // NOLINT
+                  d_bin_map[path_idx],
+              1);
+  });
+  DeviceAllocatorT alloc;
+  thrust::exclusive_scan(thrust::cuda::par(alloc), bin_segments->begin(),
+                         bin_segments->end(), bin_segments->begin());
 }
 
 inline std::vector<PathElement> DeduplicatePaths(
@@ -325,36 +327,84 @@ inline std::vector<PathElement> DeduplicatePaths(
   return new_paths;
 }
 
-inline std::vector<PathElement> SortPaths(
-    const std::vector<PathElement>& paths,
-    const std::map<size_t, size_t>& bin_map) {
-  std::vector<PathElement> sorted_paths(paths);
-  std::sort(sorted_paths.begin(), sorted_paths.end(),
-            [&](const PathElement& a, const PathElement& b) {
-              size_t a_bin = bin_map.at(a.path_idx);
-              size_t b_bin = bin_map.at(b.path_idx);
-              if (a_bin < b_bin) return true;
-              if (b_bin < a_bin) return false;
 
-              if (a.path_idx < b.path_idx) return true;
-              if (b.path_idx < a.path_idx) return false;
+template <typename PathVectorT, typename SizeVectorT, typename DeviceAllocatorT>
+void SortPathsDevice(PathVectorT* paths, const SizeVectorT& bin_map) {
+  auto d_bin_map = bin_map.data();
+  DeviceAllocatorT alloc;
+  thrust::sort(thrust::cuda::par(alloc), paths->begin(), paths->end(),
+               [=] __device__(const PathElement& a, const PathElement& b) {
+                 size_t a_bin = d_bin_map[a.path_idx];
+                 size_t b_bin = d_bin_map[b.path_idx];
+                 if (a_bin < b_bin) return true;
+                 if (b_bin < a_bin) return false;
 
-              if (a.feature_idx < b.feature_idx) return true;
-              if (b.feature_idx < a.feature_idx) return false;
-              return false;
-            });
-  return sorted_paths;
+                 if (a.path_idx < b.path_idx) return true;
+                 if (b.path_idx < a.path_idx) return false;
+
+                 if (a.feature_idx < b.feature_idx) return true;
+                 if (b.feature_idx < a.feature_idx) return false;
+                 return false;
+               });
 }
 
-inline std::map<size_t, size_t> FFDBinPacking(
+using kv = std::pair<size_t, int>;
+
+struct BFDCompare {
+  bool operator()(const kv& lhs, const kv& rhs) const {
+    if (lhs.second == rhs.second) {
+      return lhs.first < rhs.first;
+    }
+    return lhs.second < rhs.second;
+  }
+};
+
+// Best Fit Decreasing bin packing
+// Efficient O(nlogn) implementation with balanced tree using std::set
+inline std::vector<size_t> BFDBinPacking(
     const std::map<size_t, int>& counts, int bin_limit = 32) {
-  using kv = std::pair<size_t, int>;
   std::vector<kv> path_lengths(counts.begin(), counts.end());
   std::sort(path_lengths.begin(), path_lengths.end(),
             [&](const kv& a, const kv& b) {
               std::greater<> op;
               return op(a.second, b.second);
             });
+
+  // map unique_id -> bin
+  std::vector<size_t> bin_map((--counts.end())->first + 1);
+  std::set<kv, BFDCompare> bin_capacities;
+  bin_capacities.insert({bin_capacities.size(), bin_limit});
+  for (auto pair : path_lengths) {
+    int new_size = pair.second;
+    auto itr = bin_capacities.lower_bound({0, new_size});
+    // Does not fit in any bin
+    if (itr == bin_capacities.end()) {
+      size_t new_bin_idx = bin_capacities.size();
+      bin_capacities.insert({new_bin_idx, bin_limit - new_size});
+      bin_map[pair.first] = new_bin_idx;
+    } else {
+      kv entry = *itr;
+      entry.second -= new_size;
+      bin_map[pair.first] = entry.first;
+      bin_capacities.erase(itr);
+      bin_capacities.insert(entry);
+    }
+  }
+
+  return bin_map;
+}
+
+// First Fit Decreasing bin packing
+// Inefficient O(n^2) implementation
+inline std::map<size_t, size_t> FFDBinPacking(
+  const std::map<size_t, int>& counts, int bin_limit = 32) {
+  using kv = std::pair<size_t, int>;
+  std::vector<kv> path_lengths(counts.begin(), counts.end());
+  std::sort(path_lengths.begin(), path_lengths.end(),
+    [&](const kv& a, const kv& b) {
+    std::greater<> op;
+    return op(a.second, b.second);
+  });
 
   // map unique_id -> bin
   std::map<size_t, size_t> bin_map;
@@ -375,6 +425,44 @@ inline std::map<size_t, size_t> FFDBinPacking(
   return bin_map;
 }
 
+// Next Fit bin packing
+// O(n) implementation
+inline std::map<size_t, size_t> NFBinPacking(
+    const std::map<size_t, int>& counts, int bin_limit = 32) {
+  std::map<size_t, size_t> bin_map;
+  size_t current_bin = 0;
+  size_t current_capacity = bin_limit;
+  for (auto pair : counts) {
+    int new_size = pair.second;
+    if (new_size <= current_capacity) {
+      current_capacity -= new_size;
+      bin_map[pair.first] = current_bin;
+    } else {
+      current_capacity = bin_limit - new_size;
+      bin_map[pair.first] = ++current_bin;
+    }
+  }
+  return bin_map;
+}
+
+inline std::map<size_t, int> GetPathLengths(
+    const std::vector<PathElement>& paths) {
+  std::map<size_t, int> lengths;
+  int count = 0;
+  size_t current_path = 0;
+  for (const PathElement& e : paths) {
+    if (e.path_idx == current_path) {
+      count++;
+    } else {
+      lengths[current_path] = count;
+      count = 1;
+      current_path = e.path_idx;
+    }
+  }
+
+  lengths[current_path] = count;
+  return lengths;
+}
 };  // namespace detail
 
 /*!
@@ -382,7 +470,6 @@ inline std::map<size_t, size_t> FFDBinPacking(
  * and a dataset. Uses device memory proportional to the tree ensemble size.
  *
  * \tparam  DeviceAllocatorT  Optional thrust style allocator.
- * \tparam  DatasetT  User-specified dataset container.
  *
  * \param           X           Thin wrapper over a dataset allocated in device memory. X should be
  *                              trivially copyable as a kernel parameter (i.e. contain only pointers
@@ -405,28 +492,32 @@ inline std::map<size_t, size_t> FFDBinPacking(
  *                              1) + feature_idx]. Results are added to the input buffer without
  *                              zeroing memory - do not pass uninitialised memory.
  *
+ * \tparam  DatasetT  User-specified dataset container.
  */
-template <typename DeviceAllocatorT = thrust::device_allocator<int>, typename DatasetT>
+template <typename DeviceAllocatorT = thrust::device_allocator<int>,
+          typename DatasetT>
 void GPUTreeShap(DatasetT X, const std::vector<PathElement>& paths,
                  size_t num_groups, float* phis_out) {
   if (X.NumRows() == 0 || X.NumCols() == 0 || paths.empty()) return;
+
   // Sort paths by length and feature
   auto deduplicated_paths = detail::DeduplicatePaths(paths);
-  std::map<size_t, int> counts;
-  for (auto& p : paths) {
-    counts[p.path_idx]++;
-  }
-  auto bin_map = detail::FFDBinPacking(counts);
-  auto sorted_paths = detail::SortPaths(deduplicated_paths, bin_map);
-  auto segments = detail::GetBinSegments(sorted_paths, bin_map);
-  // Create allocators for our internal types
-  thrust::device_vector<PathElement, typename DeviceAllocatorT::template rebind<
-                                         PathElement>::other>
-      device_paths(sorted_paths);
-  thrust::device_vector<
-      size_t, typename DeviceAllocatorT::template rebind<size_t>::other>
-      bin_segments(segments);
-  detail::ComputeShap(X, bin_segments, device_paths, num_groups, phis_out);
+  std::map<size_t, int> counts = detail::GetPathLengths(paths);
+  auto bin_map = detail::BFDBinPacking(counts);
+  using size_vector = thrust::device_vector<
+      size_t, typename DeviceAllocatorT::template rebind<size_t>::other>;
+  using path_vector = thrust::device_vector<
+      PathElement,
+      typename DeviceAllocatorT::template rebind<PathElement>::other>;
+  size_vector device_bin_map(bin_map);
+  path_vector device_paths(deduplicated_paths);
+  detail::SortPathsDevice<path_vector, size_vector, DeviceAllocatorT>(
+      &device_paths, device_bin_map);
+  size_vector device_bin_segments;
+  detail::GetBinSegmentsDevice<path_vector, size_vector, DeviceAllocatorT>(
+      device_paths, device_bin_map, &device_bin_segments);
+  detail::ComputeShap(X, device_bin_segments, device_paths, num_groups,
+                      phis_out);
 }
 
 };  // namespace gpu_treeshap
