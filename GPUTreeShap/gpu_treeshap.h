@@ -396,7 +396,7 @@ inline std::vector<size_t> BFDBinPacking(
 
 // First Fit Decreasing bin packing
 // Inefficient O(n^2) implementation
-inline std::map<size_t, size_t> FFDBinPacking(
+inline std::vector<size_t> FFDBinPacking(
   const std::map<size_t, int>& counts, int bin_limit = 32) {
   using kv = std::pair<size_t, int>;
   std::vector<kv> path_lengths(counts.begin(), counts.end());
@@ -407,7 +407,7 @@ inline std::map<size_t, size_t> FFDBinPacking(
   });
 
   // map unique_id -> bin
-  std::map<size_t, size_t> bin_map;
+  std::vector<size_t> bin_map((--counts.end())->first + 1);
   std::vector<int> bin_capacities(path_lengths.size(), bin_limit);
   for (auto pair : path_lengths) {
     int new_size = pair.second;
@@ -427,9 +427,9 @@ inline std::map<size_t, size_t> FFDBinPacking(
 
 // Next Fit bin packing
 // O(n) implementation
-inline std::map<size_t, size_t> NFBinPacking(
+inline std::vector<size_t> NFBinPacking(
     const std::map<size_t, int>& counts, int bin_limit = 32) {
-  std::map<size_t, size_t> bin_map;
+  std::vector<size_t> bin_map((--counts.end())->first + 1);
   size_t current_bin = 0;
   size_t current_capacity = bin_limit;
   for (auto pair : counts) {
