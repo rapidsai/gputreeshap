@@ -413,7 +413,7 @@ TEST(GPUTreeShap, ActiveLabeledPartition) {
 }
 
 TEST(GPUTreeShap, BFDBinPacking) {
-  std::map<size_t, int> counts;
+  thrust::device_vector<int> counts(3);
   counts[0] = 2;
   counts[1] = 2;
   counts[2] = 1;
@@ -422,7 +422,8 @@ TEST(GPUTreeShap, BFDBinPacking) {
   EXPECT_EQ(bin_packing[1], 1u);
   EXPECT_EQ(bin_packing[2], 0u);
 
-  counts = std::map<size_t, int>();
+  counts.clear();
+  counts.resize(12);
   counts[0] = 3;
   counts[1] = 3;
   counts[2] = 3;
@@ -451,7 +452,7 @@ TEST(GPUTreeShap, BFDBinPacking) {
 }
 
 TEST(GPUTreeShap, NFBinPacking) {
-  std::map<size_t, int> counts;
+  thrust::device_vector<int> counts(4);
   counts[0] = 3;
   counts[1] = 3;
   counts[2] = 1;
@@ -464,7 +465,7 @@ TEST(GPUTreeShap, NFBinPacking) {
 }
 
 TEST(GPUTreeShap, FFDBinPacking) {
-  std::map<size_t, int> counts;
+  thrust::device_vector<int> counts(5);
   counts[0] = 3;
   counts[1] = 2;
   counts[2] = 3;
