@@ -570,12 +570,13 @@ void ComputeBias(const PathVectorT& device_paths,
  *                              NumRows()/NumCols()/GetElement(size_t row_idx, size_t col_idx) as
  *                              __device__ functions. GetElement may return NaN where the feature
  *                              value is missing.
- * \param           paths       Vector of paths, where separate paths are delineated by
+ * \param           begin       Iterator to paths, where separate paths are delineated by
  *                              PathElement.path_idx. Each unique path should contain 1 root with
  *                              feature_idx = -1 and zero_fraction = 1.0. The ordering of path
  *                              elements inside a unique path does not matter - the result will be
  *                              the same. Paths may contain duplicate features. See the PathElement
  *                              class for more information.
+ * \param           end         Path end iterator.
  * \param           num_groups  Number of output groups. In multiclass classification the algorithm
  *                              outputs feature contributions per output class.
  * \param [in,out]  phis_out    Device memory buffer for returning the feature contributions. Must
@@ -586,12 +587,14 @@ void ComputeBias(const PathVectorT& device_paths,
  *                              zeroing memory - do not pass uninitialised memory.
  *
  * \tparam  DatasetT  User-specified dataset container.
+ * \tparam  PathIteratorT Thrust type iterator, may be thrust::device_ptr for
+ * device memory, or stl iterator/raw pointer for host memory
  */
 template <typename DeviceAllocatorT = thrust::device_allocator<int>,
-          typename DatasetT>
-void GPUTreeShap(DatasetT X, const std::vector<PathElement>& paths,
+          typename DatasetT, typename PathIteratorT>
+void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
                  size_t num_groups, float* phis_out) {
-  if (X.NumRows() == 0 || X.NumCols() == 0 || paths.empty()) return;
+  if (X.NumRows() == 0 || X.NumCols() == 0 || end - begin <= 0) return;
   using size_vector = thrust::device_vector<
       size_t, typename DeviceAllocatorT::template rebind<size_t>::other>;
   using int_vector = thrust::device_vector<
@@ -602,9 +605,8 @@ void GPUTreeShap(DatasetT X, const std::vector<PathElement>& paths,
       PathElement,
       typename DeviceAllocatorT::template rebind<PathElement>::other>;
 
-
   // Compute the global bias
-  path_vector device_paths(paths);
+  path_vector device_paths(begin, end);
   double_vector bias;
   detail::ComputeBias(device_paths, &bias, num_groups);
   auto d_bias = bias.data().get();

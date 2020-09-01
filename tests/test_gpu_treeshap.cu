@@ -59,7 +59,7 @@ TEST(GPUTreeShap, BasicPaths) {
   DenseDatasetWrapper X(data.data().get(), 2, 3);
   size_t num_trees = 1;
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
-  GPUTreeShap(X, path, 1, phis.data().get());
+  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get());
   thrust::host_vector<float> result(phis);
   // First instance
   EXPECT_NEAR(result[0], 0.6277778f * num_trees, 1e-5);
@@ -94,7 +94,7 @@ TEST(GPUTreeShap, BasicPathsWithDuplicates) {
   DenseDatasetWrapper X(data.data().get(), 1, 1);
   size_t num_trees = 1;
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
-  GPUTreeShap(X, path, 1, phis.data().get());
+  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get());
   thrust::host_vector<float> result(phis);
   // First instance
   EXPECT_FLOAT_EQ(result[0], 1.1666666f * num_trees);
