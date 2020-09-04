@@ -275,7 +275,12 @@ void ComputeShap(
 template <typename PathVectorT, typename SizeVectorT, typename DeviceAllocatorT>
 void GetBinSegments(const PathVectorT& paths, const SizeVectorT& bin_map,
                           SizeVectorT* bin_segments) {
-  bin_segments->resize(bin_map.size() + 1);
+  DeviceAllocatorT alloc;
+  size_t num_bins =
+      thrust::reduce(thrust::cuda::par(alloc), bin_map.begin(), bin_map.end(),
+                     size_t(0), thrust::maximum<size_t>()) +
+      1;
+  bin_segments->resize(num_bins + 1, 0);
   auto counting = thrust::make_counting_iterator(0llu);
   auto d_paths = paths.data().get();
   auto d_bin_segments = bin_segments->data().get();
@@ -286,7 +291,6 @@ void GetBinSegments(const PathVectorT& paths, const SizeVectorT& bin_map,
                   d_bin_map[path_idx],
               1);
   });
-  DeviceAllocatorT alloc;
   thrust::exclusive_scan(thrust::cuda::par(alloc), bin_segments->begin(),
                          bin_segments->end(), bin_segments->begin());
 }
@@ -470,7 +474,7 @@ template <typename PathVectorT, typename LengthVectorT>
 void GetPathLengths(const PathVectorT& device_paths,
                           LengthVectorT* path_lengths) {
   path_lengths->resize(static_cast<PathElement>(device_paths.back()).path_idx +
-                       1);
+                       1, 0);
   auto counting = thrust::make_counting_iterator(0llu);
   auto d_paths = device_paths.data().get();
   auto d_lengths = path_lengths->data().get();
@@ -501,7 +505,7 @@ template <typename PathVectorT, typename DeviceAllocatorT>
 void ComputeBias(const PathVectorT& device_paths,
                  thrust::device_vector<double, DeviceAllocatorT>* bias,
                  size_t num_groups) {
-  bias->resize(num_groups);
+  bias->resize(num_groups, 0.0);
   PathVectorT sorted_paths(device_paths);
   DeviceAllocatorT alloc;
   // Make sure groups are contiguous
