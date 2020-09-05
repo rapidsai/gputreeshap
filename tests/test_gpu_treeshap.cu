@@ -30,11 +30,11 @@ class DenseDatasetWrapper {
  public:
   DenseDatasetWrapper(const float* data, int num_rows, int num_cols)
       : data(data), num_rows(num_rows), num_cols(num_cols) {}
-  __device__ float GetElement(size_t row_idx, size_t col_idx) {
+  __device__ float GetElement(size_t row_idx, size_t col_idx) const {
     return data[row_idx * num_cols + col_idx];
   }
-  __host__ __device__ size_t NumRows() { return num_rows; }
-  __host__ __device__ size_t NumCols() { return num_cols; }
+  __host__ __device__ size_t NumRows() const { return num_rows; }
+  __host__ __device__ size_t NumCols() const { return num_cols; }
 };
 
 // Test a simple tree and compare output to hand computed values
@@ -59,7 +59,7 @@ TEST(GPUTreeShap, BasicPaths) {
   DenseDatasetWrapper X(data.data().get(), 2, 3);
   size_t num_trees = 1;
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
-  GPUTreeShap(X, path, 1, phis.data().get());
+  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get());
   thrust::host_vector<float> result(phis);
   // First instance
   EXPECT_NEAR(result[0], 0.6277778f * num_trees, 1e-5);
@@ -94,7 +94,7 @@ TEST(GPUTreeShap, BasicPathsWithDuplicates) {
   DenseDatasetWrapper X(data.data().get(), 1, 1);
   size_t num_trees = 1;
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
-  GPUTreeShap(X, path, 1, phis.data().get());
+  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get());
   thrust::host_vector<float> result(phis);
   // First instance
   EXPECT_FLOAT_EQ(result[0], 1.1666666f * num_trees);

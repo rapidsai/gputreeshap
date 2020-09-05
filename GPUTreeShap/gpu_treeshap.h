@@ -32,7 +32,7 @@ namespace gpu_treeshap {
 struct PathElement {
   PathElement(size_t path_idx, int64_t feature_idx, int group,
               float feature_lower_bound, float feature_upper_bound,
-              bool is_missing_branch, float zero_fraction, float v)
+              bool is_missing_branch, double zero_fraction, float v)
       : path_idx(path_idx),
         feature_idx(feature_idx),
         group(group),
@@ -59,7 +59,7 @@ struct PathElement {
   bool is_missing_branch;
   /*! Probability of following this path when feature_idx is not in the active
    * set. */
-  float zero_fraction;
+  double zero_fraction;
   float v;  // Leaf weight at the end of the path
 };
 
@@ -249,10 +249,7 @@ __global__ void ShapKernel(DatasetT X, size_t warps_per_row,
   float sum = path.UnwoundPathSum();
   float* phis_row = &phis[(row_idx * num_groups + e.group) * (X.NumCols() + 1)];
 
-  if (e.feature_idx == -1) {
-    // Bias term is the expected value of this path, given no data
-    atomicAdd(phis_row + X.NumCols(), sum * e.v);
-  } else {
+  if (e.feature_idx != -1) {
     atomicAdd(phis_row + e.feature_idx,
               sum * (one_fraction - zero_fraction) * e.v);
   }
@@ -278,7 +275,12 @@ void ComputeShap(
 template <typename PathVectorT, typename SizeVectorT, typename DeviceAllocatorT>
 void GetBinSegments(const PathVectorT& paths, const SizeVectorT& bin_map,
                           SizeVectorT* bin_segments) {
-  bin_segments->resize(bin_map.size() + 1);
+  DeviceAllocatorT alloc;
+  size_t num_bins =
+      thrust::reduce(thrust::cuda::par(alloc), bin_map.begin(), bin_map.end(),
+                     size_t(0), thrust::maximum<size_t>()) +
+      1;
+  bin_segments->resize(num_bins + 1, 0);
   auto counting = thrust::make_counting_iterator(0llu);
   auto d_paths = paths.data().get();
   auto d_bin_segments = bin_segments->data().get();
@@ -289,12 +291,11 @@ void GetBinSegments(const PathVectorT& paths, const SizeVectorT& bin_map,
                   d_bin_map[path_idx],
               1);
   });
-  DeviceAllocatorT alloc;
   thrust::exclusive_scan(thrust::cuda::par(alloc), bin_segments->begin(),
                          bin_segments->end(), bin_segments->begin());
 }
 
-struct KeyTransformOp {
+struct DeduplicateKeyTransformOp {
   __device__ thrust::pair<size_t, int64_t> operator()(const PathElement& e) {
     return {e.path_idx, e.feature_idx};
   }
@@ -317,8 +318,8 @@ void DeduplicatePaths(PathVectorT* device_paths,
 
   deduplicated_paths->resize(device_paths->size());
 
-  auto key_transform =
-      thrust::make_transform_iterator(device_paths->begin(), KeyTransformOp());
+  auto key_transform = thrust::make_transform_iterator(
+      device_paths->begin(), DeduplicateKeyTransformOp());
   thrust::equal_to<thrust::pair<size_t, int64_t>> key_compare;
   auto end = thrust::reduce_by_key(
       thrust::cuda::par(alloc), key_transform,
@@ -473,13 +474,89 @@ template <typename PathVectorT, typename LengthVectorT>
 void GetPathLengths(const PathVectorT& device_paths,
                           LengthVectorT* path_lengths) {
   path_lengths->resize(static_cast<PathElement>(device_paths.back()).path_idx +
-                       1);
+                       1, 0);
   auto counting = thrust::make_counting_iterator(0llu);
   auto d_paths = device_paths.data().get();
   auto d_lengths = path_lengths->data().get();
   thrust::for_each_n(counting, device_paths.size(), [=] __device__(size_t idx) {
     auto path_idx = d_paths[idx].path_idx;
     atomicAdd(d_lengths + path_idx, 1);
+  });
+}
+
+
+struct PathIdxTransformOp {
+  __device__ size_t operator()(const PathElement& e) { return e.path_idx; }
+};
+
+struct GroupIdxTransformOp {
+  __device__ size_t operator()(const PathElement& e) { return e.group; }
+};
+
+struct BiasTransformOp {
+  __device__ double operator()(const PathElement& e) {
+    return e.zero_fraction * e.v;
+  }
+};
+
+// While it is possible to compute bias in the primary kernel, we do it here
+// using double precision to avoid numerical stability issues
+template <typename PathVectorT, typename DeviceAllocatorT>
+void ComputeBias(const PathVectorT& device_paths,
+                 thrust::device_vector<double, DeviceAllocatorT>* bias,
+                 size_t num_groups) {
+  bias->resize(num_groups, 0.0);
+  PathVectorT sorted_paths(device_paths);
+  DeviceAllocatorT alloc;
+  // Make sure groups are contiguous
+  thrust::sort(thrust::cuda::par(alloc), sorted_paths.begin(),
+               sorted_paths.end(),
+               [=] __device__(const PathElement& a, const PathElement& b) {
+                 if (a.group < b.group) return true;
+                 if (b.group < a.group) return false;
+
+                 if (a.path_idx < b.path_idx) return true;
+                 if (b.path_idx < a.path_idx) return false;
+
+                 return false;
+               });
+  // Combine zero fraction for all paths
+  auto path_key = thrust::make_transform_iterator(sorted_paths.begin(),
+                                                  PathIdxTransformOp());
+  PathVectorT combined(sorted_paths.size());
+  auto combined_out = thrust::reduce_by_key(
+      thrust::cuda ::par(alloc), path_key, path_key + sorted_paths.size(),
+      sorted_paths.begin(), thrust::make_discard_iterator(), combined.begin(),
+      thrust::equal_to<size_t>(),
+      [=] __device__(PathElement a, const PathElement& b) {
+        a.zero_fraction *= b.zero_fraction;
+        return a;
+      });
+  size_t num_paths = combined_out.second - combined.begin();
+  // Combine bias for each path, over each group
+  using size_vector = thrust::device_vector<
+      size_t, typename DeviceAllocatorT::template rebind<size_t>::other>;
+  using double_vector = thrust::device_vector<
+      double, typename DeviceAllocatorT::template rebind<double>::other>;
+  size_vector keys_out(num_paths);
+  double_vector values_out(num_paths);
+  auto group_key =
+      thrust::make_transform_iterator(combined.begin(), GroupIdxTransformOp());
+  auto values =
+      thrust::make_transform_iterator(combined.begin(), BiasTransformOp());
+
+  auto out_itr = thrust::reduce_by_key(thrust::cuda::par(alloc), group_key,
+                                       group_key + num_paths, values,
+                                       keys_out.begin(), values_out.begin());
+
+  // Write result
+  size_t n = out_itr.first - keys_out.begin();
+  auto counting = thrust::make_counting_iterator(0llu);
+  auto d_keys_out = keys_out.data().get();
+  auto d_values_out = values_out.data().get();
+  auto d_bias = bias->data().get();
+  thrust::for_each_n(counting, n, [=] __device__(size_t idx) {
+    d_bias[d_keys_out[idx]] = d_values_out[idx];
   });
 }
 
@@ -497,12 +574,13 @@ void GetPathLengths(const PathVectorT& device_paths,
  *                              NumRows()/NumCols()/GetElement(size_t row_idx, size_t col_idx) as
  *                              __device__ functions. GetElement may return NaN where the feature
  *                              value is missing.
- * \param           paths       Vector of paths, where separate paths are delineated by
+ * \param           begin       Iterator to paths, where separate paths are delineated by
  *                              PathElement.path_idx. Each unique path should contain 1 root with
  *                              feature_idx = -1 and zero_fraction = 1.0. The ordering of path
  *                              elements inside a unique path does not matter - the result will be
  *                              the same. Paths may contain duplicate features. See the PathElement
  *                              class for more information.
+ * \param           end         Path end iterator.
  * \param           num_groups  Number of output groups. In multiclass classification the algorithm
  *                              outputs feature contributions per output class.
  * \param [in,out]  phis_out    Device memory buffer for returning the feature contributions. Must
@@ -513,21 +591,36 @@ void GetPathLengths(const PathVectorT& device_paths,
  *                              zeroing memory - do not pass uninitialised memory.
  *
  * \tparam  DatasetT  User-specified dataset container.
+ * \tparam  PathIteratorT Thrust type iterator, may be thrust::device_ptr for
+ * device memory, or stl iterator/raw pointer for host memory
  */
 template <typename DeviceAllocatorT = thrust::device_allocator<int>,
-          typename DatasetT>
-void GPUTreeShap(DatasetT X, const std::vector<PathElement>& paths,
+          typename DatasetT, typename PathIteratorT>
+void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
                  size_t num_groups, float* phis_out) {
-  if (X.NumRows() == 0 || X.NumCols() == 0 || paths.empty()) return;
+  if (X.NumRows() == 0 || X.NumCols() == 0 || end - begin <= 0) return;
   using size_vector = thrust::device_vector<
       size_t, typename DeviceAllocatorT::template rebind<size_t>::other>;
   using int_vector = thrust::device_vector<
       int, typename DeviceAllocatorT::template rebind<int>::other>;
+  using double_vector = thrust::device_vector<
+      double, typename DeviceAllocatorT::template rebind<double>::other>;
   using path_vector = thrust::device_vector<
       PathElement,
       typename DeviceAllocatorT::template rebind<PathElement>::other>;
 
-  path_vector device_paths(paths);
+  // Compute the global bias
+  path_vector device_paths(begin, end);
+  double_vector bias;
+  detail::ComputeBias(device_paths, &bias, num_groups);
+  auto d_bias = bias.data().get();
+  thrust::for_each_n(thrust::make_counting_iterator(0llu),
+                     X.NumRows() * num_groups, [=] __device__(size_t idx) {
+                       size_t group = idx % num_groups;
+                       phis_out[(idx + 1) * (X.NumCols() + 1) - 1]  +=
+                           d_bias[group];
+                     });
+
   path_vector deduplicated_paths;
   // Sort paths by length and feature
   detail::DeduplicatePaths<path_vector, DeviceAllocatorT>(&device_paths,
