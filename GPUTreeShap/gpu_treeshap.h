@@ -121,7 +121,7 @@ inline __device__ ContiguousGroup active_labeled_partition(int label) {
 }
 
 template <typename DatasetT>
-__device__ float GetOneFraction(const PathElement& e, DatasetT X,
+__device__ float GetOneFraction(const PathElement& e, const DatasetT& X,
                                 size_t row_idx) {
   // First element in path (bias term) is always zero
   if (e.feature_idx == -1) return 0.0;
@@ -202,55 +202,67 @@ class GroupPath {
       total += __fdividef(numerator, precomputed);
     }
 
-    if (g_.thread_rank() == 0) {
-      return pweight_ * (unique_depth_ + 1);
-    }
     return total;
   }
 };
 
-template <typename DatasetT>
-__global__ void ShapKernel(DatasetT X, size_t warps_per_row,
+inline __host__ __device__ size_t DivRoundUp(size_t a, size_t b) {
+  return (a + b - 1) / b;
+}
+#define GPUTREESHAP_MAX_THREADS_PER_BLOCK 256
+
+template <typename DatasetT, size_t kBlockSize, size_t kRowsPerWarp>
+__global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
+    ShapKernel(DatasetT X, size_t bins_per_row,
                            const PathElement* path_elements,
                            const size_t* bin_segments, size_t num_groups,
                            float* phis) {
   // Partition work
   // Each warp processes a training instance applied to a path
-  cooperative_groups::thread_block block =
-      cooperative_groups::this_thread_block();
-  auto warp =
-      cooperative_groups::tiled_partition<32, cooperative_groups::thread_block>(
-          block);
-  size_t tid =
-      size_t(block.size()) * block.group_index().x + block.thread_rank();
-  size_t warp_rank = tid / warp.size();
-  if (warp_rank >= warps_per_row * X.NumRows()) return;
-  size_t row_idx = warp_rank / warps_per_row;
-  size_t bin_idx = warp_rank % warps_per_row;
+  size_t tid = kBlockSize * blockIdx.x + threadIdx.x;
+  const size_t warp_size = 32;
+  size_t warp_rank = tid / warp_size;
+  if (warp_rank >= bins_per_row * DivRoundUp(X.NumRows(), kRowsPerWarp))
+    return;
+  size_t bin_idx = warp_rank % bins_per_row;
+  size_t bank = warp_rank / bins_per_row;
   size_t path_start = bin_segments[bin_idx];
   size_t path_end = bin_segments[bin_idx + 1];
-  assert(path_end - path_start <= warp.size());
+  assert(path_end - path_start <= warp_size);
   assert(num_groups > 0);
-  if (warp.thread_rank() >= path_end - path_start) return;
-  const PathElement& e = path_elements[path_start + warp.thread_rank()];
+  uint32_t thread_rank = threadIdx.x % warp_size;
+  if (thread_rank >= path_end - path_start) return;
+  __shared__ PathElement s_elements[kBlockSize];
+  s_elements[threadIdx.x] = path_elements[path_start + thread_rank];
+  const PathElement& e = s_elements[threadIdx.x];
+
+  float zero_fraction = e.zero_fraction;
   auto labelled_group = active_labeled_partition(e.path_idx);
   size_t unique_path_length = labelled_group.size();
-  float one_fraction = GetOneFraction(e, X, row_idx);
-  float zero_fraction = e.zero_fraction;
-  GroupPath path(labelled_group, zero_fraction, one_fraction);
 
-  // Extend the path
-  for (auto unique_depth = 1ull; unique_depth < unique_path_length;
-       unique_depth++) {
-    path.Extend();
-  }
+  float* phis_row =
+      &phis[(bank * kRowsPerWarp * num_groups + e.group) * (X.NumCols() + 1)];
+  int phis_row_stride = X.NumCols() + 1;
 
-  float sum = path.UnwoundPathSum();
-  float* phis_row = &phis[(row_idx * num_groups + e.group) * (X.NumCols() + 1)];
+  for (int64_t row_idx = bank * kRowsPerWarp;
+       row_idx < (bank + 1) * kRowsPerWarp && row_idx < X.NumRows();
+       row_idx++) {
+    float one_fraction = GetOneFraction(e, X, row_idx);
+    GroupPath path(labelled_group, zero_fraction, one_fraction);
 
-  if (e.feature_idx != -1) {
-    atomicAdd(phis_row + e.feature_idx,
-              sum * (one_fraction - zero_fraction) * e.v);
+    // Extend the path
+    for (auto unique_depth = 1ull; unique_depth < unique_path_length;
+         unique_depth++) {
+      path.Extend();
+    }
+
+    float sum = path.UnwoundPathSum();
+
+    if (e.feature_idx != -1) {
+      atomicAdd(phis_row + e.feature_idx,
+                sum * (one_fraction - zero_fraction) * e.v);
+    }
+    phis_row += phis_row_stride;
   }
 }
 
@@ -260,15 +272,18 @@ void ComputeShap(
     const thrust::device_vector<size_t, SizeTAllocatorT>& bin_segments,
     const thrust::device_vector<PathElement, PathAllocatorT>& path_elements,
     size_t num_groups, float* phis) {
-  size_t warps_per_row = bin_segments.size() - 1;
-  const int kBlockThreads = 512;
+  size_t bins_per_row = bin_segments.size() - 1;
+  const int kBlockThreads = GPUTREESHAP_MAX_THREADS_PER_BLOCK;
   const int warps_per_block = kBlockThreads / 32;
-  const uint32_t grid_size = static_cast<uint32_t>(
-      (warps_per_row * X.NumRows() + warps_per_block - 1) / warps_per_block);
+  const int kRowsPerWarp = 32;
+  size_t warps_needed = bins_per_row * DivRoundUp(X.NumRows(), kRowsPerWarp);
 
-  ShapKernel<<<grid_size, kBlockThreads>>>(
-      X, warps_per_row, path_elements.data().get(), bin_segments.data().get(),
-      num_groups, phis);
+  const uint32_t grid_size = DivRoundUp(warps_needed, warps_per_block);
+
+  ShapKernel<DatasetT, kBlockThreads, kRowsPerWarp>
+      <<<grid_size, kBlockThreads>>>(
+          X, bins_per_row, path_elements.data().get(),
+          bin_segments.data().get(), num_groups, phis);
 }
 
 template <typename PathVectorT, typename SizeVectorT, typename DeviceAllocatorT>

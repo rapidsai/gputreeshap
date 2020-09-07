@@ -74,14 +74,22 @@ class Model:
         self.num_trees, self.num_leaves, self.average_depth = get_model_stats(self.xgb_model)
 
 
-def run_benchmark(args):
+def check_accuracy(shap, margin):
+    if not np.allclose(np.sum(shap, axis=len(shap.shape) - 1), margin, 1e-1, 1e-1):
+        print("Warning: Failed 1e-1 accuracy")
+    if not np.allclose(np.sum(shap, axis=len(shap.shape) - 1), margin, 1e-3, 1e-3):
+        print("Warning: Failed 1e-3 accuracy")
+
+
+def get_models(args):
     test_datasets = [
         TestDataset("covtype", datasets.fetch_covtype(return_X_y=True), "multi:softmax"),
         TestDataset("cal_housing", datasets.fetch_california_housing(return_X_y=True),
                     "reg:squarederror"),
         TestDataset("fashion_mnist", fetch_fashion_mnist(), "multi:softmax"),
         TestDataset("adult", fetch_adult(), "binary:logistic"),
-        ]
+    ]
+
     models = []
     for d in test_datasets:
         small_name = d.name + "-small"
@@ -93,7 +101,10 @@ def run_benchmark(args):
         large_name = d.name + "-large"
         if large_name in args.model or args.model == "all":
             models.append(Model(large_name, d, 1000, 16))
+    return models
 
+
+def print_model_stats(models):
     # get model statistics
     models_df = pd.DataFrame(
         columns=["model", "num_rounds", "num_trees", "num_leaves", "max_depth", "average_depth"])
@@ -106,33 +117,40 @@ def run_benchmark(args):
     print("Model size:")
     print(models_df)
 
+
+def run_benchmark(args):
+    models = get_models(args)
+    print_model_stats(models)
+
     predictors = ["cpu_predictor", "gpu_predictor"]
     # predictors = ["gpu_predictor"]
-    test_rows = 10000
-    df = pd.DataFrame(columns=["model", "test_rows", "cpu_time", "gpu_time", "speedup"])
+    test_rows = args.nrows
+    df = pd.DataFrame(
+        columns=["model", "test_rows", "cpu_time", "cpu_std", "gpu_time", "gpu_std", "speedup"])
     for m in models:
         dtest = m.dataset.get_test_dmat(test_rows)
         result_row = {"model": m.name, "test_rows": test_rows}
         for p in predictors:
             m.xgb_model.set_param({"predictor": p})
-            start = time.perf_counter()
-            xgb_shap = m.xgb_model.predict(dtest, pred_contribs=True)
-            runtime = time.perf_counter() - start
+            samples = []
+            for i in range(args.niter):
+                start = time.perf_counter()
+                xgb_shap = m.xgb_model.predict(dtest, pred_contribs=True)
+                samples.append(time.perf_counter() - start)
             if p is "gpu_predictor":
-                result_row["gpu_time"] = runtime
+                result_row["gpu_time"] = np.mean(samples)
+                result_row["gpu_std"] = np.std(samples)
             else:
-                result_row["cpu_time"] = runtime
+                result_row["cpu_time"] = np.mean(samples)
+                result_row["cpu_std"] = np.std(samples)
             # Check result
             margin = m.xgb_model.predict(dtest, output_margin=True)
-
-            if not np.allclose(np.sum(xgb_shap, axis=len(xgb_shap.shape) - 1), margin, 1e-1, 1e-1):
-                print("Warning: Failed 1e-1 accuracy")
-            if not np.allclose(np.sum(xgb_shap, axis=len(xgb_shap.shape) - 1), margin, 1e-3, 1e-3):
-                print("Warning: Failed 1e-3 accuracy")
+            check_accuracy(xgb_shap, margin)
 
         result_row["speedup"] = result_row["cpu_time"] / result_row["gpu_time"]
         df = df.append(result_row,
                        ignore_index=True)
+        print(df)
     print("Results:")
     print(df)
 
@@ -144,6 +162,9 @@ parser.add_argument("-model", default="all", type=str,
 parser.add_argument("-nrows", default=10000, type=int,
                     help=(
                         "Number of test rows."))
+parser.add_argument("-niter", default=5, type=int,
+                    help=(
+                        "Number of times to repeat the experiment."))
 
 args = parser.parse_args()
 run_benchmark(args)
