@@ -30,16 +30,15 @@
 namespace gpu_treeshap {
 /*! An element of a unique path through a decision tree. */
 struct PathElement {
-  PathElement(size_t path_idx, int64_t feature_idx, int group,
-              float feature_lower_bound, float feature_upper_bound,
-              bool is_missing_branch, double zero_fraction, float v)
-      : path_idx(path_idx),
-        feature_idx(feature_idx),
-        group(group),
+  __host__ __device__ PathElement(size_t path_idx, int64_t feature_idx,
+                                  int group, float feature_lower_bound,
+                                  float feature_upper_bound,
+                                  bool is_missing_branch, double zero_fraction,
+                                  float v)
+      : path_idx(path_idx), feature_idx(feature_idx), group(group),
         feature_lower_bound(feature_lower_bound),
         feature_upper_bound(feature_upper_bound),
-        is_missing_branch(is_missing_branch),
-        zero_fraction(zero_fraction),
+        is_missing_branch(is_missing_branch), zero_fraction(zero_fraction),
         v(v) {
     assert(feature_lower_bound <= feature_upper_bound);
   }
