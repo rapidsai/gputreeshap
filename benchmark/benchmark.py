@@ -123,13 +123,12 @@ def run_benchmark(args):
     print_model_stats(models)
 
     predictors = ["cpu_predictor", "gpu_predictor"]
-    # predictors = ["gpu_predictor"]
     test_rows = args.nrows
     df = pd.DataFrame(
         columns=["model", "test_rows", "cpu_time", "cpu_std", "gpu_time", "gpu_std", "speedup"])
     for m in models:
         dtest = m.dataset.get_test_dmat(test_rows)
-        result_row = {"model": m.name, "test_rows": test_rows}
+        result_row = {"model": m.name, "test_rows": test_rows,"cpu_time":0.0}
         for p in predictors:
             m.xgb_model.set_param({"predictor": p})
             samples = []

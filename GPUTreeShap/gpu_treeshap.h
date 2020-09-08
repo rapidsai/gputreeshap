@@ -219,10 +219,12 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
                            float* phis) {
   // Partition work
   // Each warp processes a training instance applied to a path
+  __shared__ DatasetT s_X;
+  s_X = X;
   size_t tid = kBlockSize * blockIdx.x + threadIdx.x;
   const size_t warp_size = 32;
   size_t warp_rank = tid / warp_size;
-  if (warp_rank >= bins_per_row * DivRoundUp(X.NumRows(), kRowsPerWarp))
+  if (warp_rank >= bins_per_row * DivRoundUp(s_X.NumRows(), kRowsPerWarp))
     return;
   size_t bin_idx = warp_rank % bins_per_row;
   size_t bank = warp_rank / bins_per_row;
@@ -240,14 +242,10 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
   auto labelled_group = active_labeled_partition(e.path_idx);
   size_t unique_path_length = labelled_group.size();
 
-  float* phis_row =
-      &phis[(bank * kRowsPerWarp * num_groups + e.group) * (X.NumCols() + 1)];
-  int phis_row_stride = X.NumCols() + 1;
-
   for (int64_t row_idx = bank * kRowsPerWarp;
-       row_idx < (bank + 1) * kRowsPerWarp && row_idx < X.NumRows();
+       row_idx < (bank + 1) * kRowsPerWarp && row_idx < s_X.NumRows();
        row_idx++) {
-    float one_fraction = GetOneFraction(e, X, row_idx);
+    float one_fraction = GetOneFraction(e, s_X, row_idx);
     GroupPath path(labelled_group, zero_fraction, one_fraction);
 
     // Extend the path
@@ -258,11 +256,11 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
 
     float sum = path.UnwoundPathSum();
 
+    float* phis_row = &phis[(row_idx * num_groups + e.group) * (s_X.NumCols() + 1)];
     if (e.feature_idx != -1) {
       atomicAdd(phis_row + e.feature_idx,
                 sum * (one_fraction - zero_fraction) * e.v);
     }
-    phis_row += phis_row_stride;
   }
 }
 
@@ -275,7 +273,7 @@ void ComputeShap(
   size_t bins_per_row = bin_segments.size() - 1;
   const int kBlockThreads = GPUTREESHAP_MAX_THREADS_PER_BLOCK;
   const int warps_per_block = kBlockThreads / 32;
-  const int kRowsPerWarp = 32;
+  const int kRowsPerWarp = 1024;
   size_t warps_needed = bins_per_row * DivRoundUp(X.NumRows(), kRowsPerWarp);
 
   const uint32_t grid_size = DivRoundUp(warps_needed, warps_per_block);

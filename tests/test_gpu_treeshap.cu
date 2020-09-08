@@ -28,6 +28,7 @@ class DenseDatasetWrapper {
   int num_cols;
 
  public:
+  DenseDatasetWrapper() = default;
   DenseDatasetWrapper(const float* data, int num_rows, int num_cols)
       : data(data), num_rows(num_rows), num_cols(num_cols) {}
   __device__ float GetElement(size_t row_idx, size_t col_idx) const {
