@@ -104,7 +104,7 @@ def get_models(args):
     return models
 
 
-def print_model_stats(models):
+def print_model_stats(models, args):
     # get model statistics
     models_df = pd.DataFrame(
         columns=["model", "num_rounds", "num_trees", "num_leaves", "max_depth", "average_depth"])
@@ -114,21 +114,23 @@ def print_model_stats(models):
              "num_leaves": m.num_leaves, "max_depth": m.max_depth,
              "average_depth": m.average_depth},
             ignore_index=True)
-    print("Model size:")
     print(models_df)
+    print("Writing model statistics to: " + args.out_models)
+    models_df.to_csv(args.out_models, index=False)
 
 
 def run_benchmark(args):
     models = get_models(args)
-    print_model_stats(models)
+    print_model_stats(models, args)
 
     predictors = ["cpu_predictor", "gpu_predictor"]
     test_rows = args.nrows
     df = pd.DataFrame(
-        columns=["model", "test_rows", "cpu_time", "cpu_std", "gpu_time", "gpu_std", "speedup"])
+        columns=["model", "test_rows", "cpu_time(s)", "cpu_std", "gpu_time(s)", "gpu_std",
+                 "speedup"])
     for m in models:
         dtest = m.dataset.get_test_dmat(test_rows)
-        result_row = {"model": m.name, "test_rows": test_rows,"cpu_time":0.0}
+        result_row = {"model": m.name, "test_rows": test_rows, "cpu_time(s)": 0.0}
         for p in predictors:
             m.xgb_model.set_param({"predictor": p})
             samples = []
@@ -137,21 +139,21 @@ def run_benchmark(args):
                 xgb_shap = m.xgb_model.predict(dtest, pred_contribs=True)
                 samples.append(time.perf_counter() - start)
             if p is "gpu_predictor":
-                result_row["gpu_time"] = np.mean(samples)
+                result_row["gpu_time(s)"] = np.mean(samples)
                 result_row["gpu_std"] = np.std(samples)
             else:
-                result_row["cpu_time"] = np.mean(samples)
+                result_row["cpu_time(s)"] = np.mean(samples)
                 result_row["cpu_std"] = np.std(samples)
             # Check result
             margin = m.xgb_model.predict(dtest, output_margin=True)
             check_accuracy(xgb_shap, margin)
 
-        result_row["speedup"] = result_row["cpu_time"] / result_row["gpu_time"]
+        result_row["speedup"] = result_row["cpu_time(s)"] / result_row["gpu_time(s)"]
         df = df.append(result_row,
                        ignore_index=True)
         print(df)
-    print("Results:")
-    print(df)
+    print("Writing results to: " + args.out)
+    df.to_csv(args.out, index=False)
 
 
 parser = argparse.ArgumentParser(description='GPUTreeShap benchmark')
@@ -164,6 +166,11 @@ parser.add_argument("-nrows", default=10000, type=int,
 parser.add_argument("-niter", default=5, type=int,
                     help=(
                         "Number of times to repeat the experiment."))
+parser.add_argument("-format", default="text", type=str,
+                    help="Format of output tables. E.g. text,latex,csv")
+
+parser.add_argument("-out", default="results.csv", type=str)
+parser.add_argument("-out_models", default="models.csv", type=str)
 
 args = parser.parse_args()
 run_benchmark(args)
