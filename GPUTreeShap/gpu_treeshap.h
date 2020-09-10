@@ -454,7 +454,7 @@ std::vector<size_t> NFBinPacking(
   thrust::host_vector<int> counts_host(counts);
   std::vector<size_t> bin_map(counts_host.size());
   size_t current_bin = 0;
-  size_t current_capacity = bin_limit;
+  int current_capacity = bin_limit;
   for (auto i = 0ull; i < counts_host.size(); i++) {
     int new_size = counts_host[i];
     size_t path_idx = i;
