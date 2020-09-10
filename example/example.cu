@@ -149,13 +149,15 @@ class DenseDatasetWrapper {
   int num_cols;
 
  public:
-  DenseDatasetWrapper(const float* data, int num_rows, int num_cols)
+  DenseDatasetWrapper() = default;
+  __host__ __device__ DenseDatasetWrapper(const float *data, int num_rows,
+                                          int num_cols)
       : data(data), num_rows(num_rows), num_cols(num_cols) {}
-  __device__ float GetElement(size_t row_idx, size_t col_idx) {
+  __device__ float GetElement(size_t row_idx, size_t col_idx) const {
     return data[row_idx * num_cols + col_idx];
   }
-  __host__ __device__ size_t NumRows() { return num_rows; }
-  __host__ __device__ size_t NumCols() { return num_cols; }
+  __host__ __device__ size_t NumRows() const { return num_rows; }
+  __host__ __device__ size_t NumCols() const { return num_cols; }
 };
 
 int main() {
@@ -188,7 +190,8 @@ int main() {
   data[5] = 1.0;
   DenseDatasetWrapper X(data.data().get(), 2, 3);
   thrust::device_vector<float> phis((X.NumCols() + 1) * X.NumRows());
-  gpu_treeshap::GPUTreeShap(X, paths, 1, phis.data().get());
+  gpu_treeshap::GPUTreeShap(X, paths.cbegin(), paths.cend(), 1,
+                            phis.data().get());
 
   // Print the resulting feature contributions
   std::cout << "\n";

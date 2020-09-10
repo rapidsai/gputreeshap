@@ -617,7 +617,7 @@ void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
   thrust::for_each_n(thrust::make_counting_iterator(0llu),
                      X.NumRows() * num_groups, [=] __device__(size_t idx) {
                        size_t group = idx % num_groups;
-                       phis_out[(idx + 1) * (X.NumCols() + 1) - 1]  +=
+                       phis_out[(idx + 1) * (X.NumCols() + 1) - 1] +=
                            d_bias[group];
                      });
 
