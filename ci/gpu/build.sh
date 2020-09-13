@@ -14,7 +14,7 @@ function logger() {
 }
 
 # Set path and build parallel level
-export PATH=/conda/bin:/usr/local/cuda/bin:$PATH
+export PATH=/usr/local/cuda/bin:$PATH
 export PARALLEL_LEVEL=4
 export CUDA_REL=${CUDA_VERSION%.*}
 
