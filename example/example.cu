@@ -152,7 +152,7 @@ class DenseDatasetWrapper {
   DenseDatasetWrapper() = default;
   DenseDatasetWrapper(const float* data, int num_rows, int num_cols)
       : data(data), num_rows(num_rows), num_cols(num_cols) {}
-  __device__ float GetElement(size_t row_idx, size_t col_idx) {
+  __device__ float GetElement(size_t row_idx, size_t col_idx) const {
     return data[row_idx * num_cols + col_idx];
   }
   __host__ __device__ size_t NumRows() const { return num_rows; }
