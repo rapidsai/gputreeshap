@@ -190,7 +190,7 @@ int main() {
   DenseDatasetWrapper X(data.data().get(), 2, 3);
   thrust::device_vector<float> phis((X.NumCols() + 1) * X.NumRows());
   gpu_treeshap::GPUTreeShap(X, paths.begin(), paths.end(), 1,
-                            phis.data().get());
+                            phis.data().get(), phis.size());
 
   // Print the resulting feature contributions
   std::cout << "\n";

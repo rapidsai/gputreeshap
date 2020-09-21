@@ -77,6 +77,13 @@ namespace detail {
 template<class T, class DeviceAllocatorT> using RebindVector = thrust::device_vector<
       T, typename DeviceAllocatorT::template rebind<T>::other>;
 
+template <typename PtrT>
+bool IsDeviceAccessible(PtrT ptr) {
+  cudaPointerAttributes attributes;
+  cudaPointerGetAttributes(&attributes, ptr);
+  return attributes.type != cudaMemoryTypeUnregistered;
+}
+
 __forceinline__ __device__ unsigned int lanemask32_lt() {
   unsigned int lanemask32_lt;
   asm volatile("mov.u32 %0, %%lanemask_lt;" : "=r"(lanemask32_lt));
@@ -661,44 +668,57 @@ void ComputeBias(DatasetT X, const PathVectorT& device_paths, size_t num_groups,
 
 };  // namespace detail
 
-
 /*!
  * Compute feature contributions on the GPU given a set of unique paths through a tree ensemble
  * and a dataset. Uses device memory proportional to the tree ensemble size.
  *
  * \tparam  DeviceAllocatorT  Optional thrust style allocator.
  *
- * \param           X           Thin wrapper over a dataset allocated in device memory. X should be
- *                              trivially copyable as a kernel parameter (i.e. contain only pointers
- *                              to actual data) and must implement the methods
- *                              NumRows()/NumCols()/GetElement(size_t row_idx, size_t col_idx) as
- *                              __device__ functions. GetElement may return NaN where the feature
- *                              value is missing.
- * \param           begin       Iterator to paths, where separate paths are delineated by
- *                              PathElement.path_idx. Each unique path should contain 1 root with
- *                              feature_idx = -1 and zero_fraction = 1.0. The ordering of path
- *                              elements inside a unique path does not matter - the result will be
- *                              the same. Paths may contain duplicate features. See the PathElement
- *                              class for more information.
- * \param           end         Path end iterator.
- * \param           num_groups  Number of output groups. In multiclass classification the algorithm
- *                              outputs feature contributions per output class.
- * \param [in,out]  phis_out    Device memory buffer for returning the feature contributions. Must
- *                              be of size X.NumRows() * (X.NumCols() + 1) * num_groups. The last
- *                              feature column contains the bias term. Feature contributions can be
- *                              retrieved by phis_out[(row_idx * num_groups + group) * (X.NumCols() +
- *                              1) + feature_idx]. Results are added to the input buffer without
- *                              zeroing memory - do not pass uninitialised memory.
+ * \param           X               Thin wrapper over a dataset allocated in device memory. X
+ *                                  should be trivially copyable as a kernel parameter (i.e.
+ *                                  contain only pointers to actual data) and must implement the
+ *                                  methods NumRows()/NumCols()/GetElement(size_t row_idx, size_t
+ *                                  col_idx) as __device__ functions. GetElement may return NaN
+ *                                  where the feature value is missing.
+ * \param           begin           Iterator to paths, where separate paths are delineated by
+ *                                  PathElement.path_idx. Each unique path should contain 1 root
+ *                                  with feature_idx = -1 and zero_fraction = 1.0. The ordering of
+ *                                  path elements inside a unique path does not matter - the result
+ *                                  will be the same. Paths may contain duplicate features. See the
+ *                                  PathElement class for more information.
+ * \param           end             Path end iterator.
+ * \param           num_groups      Number of output groups. In multiclass classification the
+ *                                  algorithm outputs feature contributions per output class.
+ * \param [in,out]  phis_out        Device memory buffer for returning the feature contributions.
+ *                                  The last feature column contains the bias term. Feature
+ *                                  contributions can be retrieved by phis_out[(row_idx *
+ *                                  num_groups + group) * (X.NumCols() + 1) + feature_idx]. Results
+ *                                  are added to the input buffer without zeroing memory - do not
+ *                                  pass uninitialised memory.
+ * \param           phis_out_length Length of the phis_out for bounds checking. Must be at least of
+ *                                  size X.NumRows() * (X.NumCols() + 1) * num_groups.
  *
  * \tparam  DatasetT  User-specified dataset container.
- * \tparam  PathIteratorT Thrust type iterator, may be thrust::device_ptr for
- * device memory, or stl iterator/raw pointer for host memory
+ *
+ * \tparam  PathIteratorT Thrust type iterator, may be thrust::device_ptr for device memory, or stl
+ *                        iterator/raw pointer for host memory.
  */
 template <typename DeviceAllocatorT = thrust::device_allocator<int>,
           typename DatasetT, typename PathIteratorT>
 void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
-                 size_t num_groups, float* phis_out) {
+                 size_t num_groups, float* phis_out, size_t phis_out_length) {
   if (X.NumRows() == 0 || X.NumCols() == 0 || end - begin <= 0) return;
+
+  if (phis_out_length < X.NumRows() * (X.NumCols() + 1) * num_groups) {
+    throw std::invalid_argument(
+        "phis_out must be at least of size X.NumRows() * (X.NumCols() + 1) * "
+        "num_groups");
+  }
+
+  if (!detail ::IsDeviceAccessible(phis_out)) {
+    throw std::invalid_argument("phis_out must be device accessible");
+  }
+
   using size_vector = detail::RebindVector<size_t, DeviceAllocatorT>;
   using double_vector = detail::RebindVector<double, DeviceAllocatorT>;
   using path_vector = detail::RebindVector<PathElement, DeviceAllocatorT>;
@@ -731,30 +751,30 @@ void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
  * Compute feature interaction contributions on the GPU given a set of unique paths through a tree
  * ensemble and a dataset. Uses device memory proportional to the tree ensemble size.
  *
- * \tparam  DeviceAllocatorT  Optional thrust style allocator.
- *
- * \param           X           Thin wrapper over a dataset allocated in device memory. X should be
- *                              trivially copyable as a kernel parameter (i.e. contain only pointers
- *                              to actual data) and must implement the methods
- *                              NumRows()/NumCols()/GetElement(size_t row_idx, size_t col_idx) as
- *                              __device__ functions. GetElement may return NaN where the feature
- *                              value is missing.
- * \param           begin       Iterator to paths, where separate paths are delineated by
- *                              PathElement.path_idx. Each unique path should contain 1 root with
- *                              feature_idx = -1 and zero_fraction = 1.0. The ordering of path
- *                              elements inside a unique path does not matter - the result will be
- *                              the same. Paths may contain duplicate features. See the PathElement
- *                              class for more information.
- * \param           end         Path end iterator.
- * \param           num_groups  Number of output groups. In multiclass classification the algorithm
- *                              outputs feature contributions per output class.
- * \param [in,out]  phis_out    Device memory buffer for returning the feature interaction
- *                              contributions. Must be of size X.NumRows() * (X.NumCols() + 1) *
- *                              (X.NumCols() + 1) * num_groups. The last feature column contains the
- *                              bias term. Results are added to the input buffer without zeroing
- *                              memory - do not pass uninitialised memory.
- *
  * \tparam  DatasetT  User-specified dataset container.
+ *
+ * \param           X               Thin wrapper over a dataset allocated in device memory. X
+ *                                  should be trivially copyable as a kernel parameter (i.e.
+ *                                  contain only pointers to actual data) and must implement the
+ *                                  methods NumRows()/NumCols()/GetElement(size_t row_idx, size_t
+ *                                  col_idx) as __device__ functions. GetElement may return NaN
+ *                                  where the feature value is missing.
+ * \param           begin           Iterator to paths, where separate paths are delineated by
+ *                                  PathElement.path_idx. Each unique path should contain 1 root
+ *                                  with feature_idx = -1 and zero_fraction = 1.0. The ordering of
+ *                                  path elements inside a unique path does not matter - the result
+ *                                  will be the same. Paths may contain duplicate features. See the
+ *                                  PathElement class for more information.
+ * \param           end             Path end iterator.
+ * \param           num_groups      Number of output groups. In multiclass classification the
+ *                                  algorithm outputs feature contributions per output class.
+ * \param [in,out]  phis_out        Device memory buffer for returning the feature interaction
+ *                                  contributions.  The last feature column contains the bias term.
+ *                                  Results are added to the input buffer without zeroing memory -
+ *                                  do not pass uninitialised memory.
+ * \param           phis_out_length Length of the phis_out for bounds checking. Must be at least
+ *                                  size X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) *
+ *                                  num_groups. *.
  *
  * \tparam  PathIteratorT Thrust type iterator, may be thrust::device_ptr for device memory, or stl
  *                        iterator/raw pointer for host memory.
@@ -762,8 +782,21 @@ void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
 template <typename DeviceAllocatorT = thrust::device_allocator<int>,
           typename DatasetT, typename PathIteratorT>
 void GPUTreeShapInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
-                             size_t num_groups, float* phis_out) {
+                             size_t num_groups, float* phis_out,
+                             size_t phis_out_length) {
   if (X.NumRows() == 0 || X.NumCols() == 0 || end - begin <= 0) return;
+  if (phis_out_length <
+      X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) * num_groups) {
+    throw std::invalid_argument(
+        "phis_out must be at least of size X.NumRows() * (X.NumCols() + 1)  * "
+        "(X.NumCols() + 1) * "
+        "num_groups");
+  }
+
+  if (!detail ::IsDeviceAccessible(phis_out)) {
+    throw std::invalid_argument("phis_out must be device accessible");
+  }
+
   using size_vector = detail::RebindVector<size_t, DeviceAllocatorT>;
   using double_vector = detail::RebindVector<double, DeviceAllocatorT>;
   using path_vector = detail::RebindVector<PathElement, DeviceAllocatorT>;

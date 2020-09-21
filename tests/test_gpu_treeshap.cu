@@ -156,7 +156,7 @@ TEST_P(ShapSumTest, ShapSum) {
 
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1) *
                                     num_groups);
-  GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.data().get());
+  GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.data().get(), phis.size());
   thrust::host_vector<float> result(phis);
   std::vector<float> sum(num_rows * num_groups);
   for (auto i = 0ull; i < num_rows; i++) {
@@ -172,6 +172,8 @@ TEST_P(ShapSumTest, ShapSum) {
   }
 }
 
+// Generate a bunch of random models and check the shap results sum up to the
+// predictions
 INSTANTIATE_TEST_CASE_P(
     GPUTreeShapInstantiation, ShapSumTest,
     testing::Combine(testing::Values(1, 10, 100, 1000),
@@ -197,10 +199,39 @@ TEST(GPUTreeShap, PathTooLong) {
       std::vector<float>({1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f});
   DenseDatasetWrapper X(data.data().get(), 2, 3);
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
-  EXPECT_THROW(GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get()),
+  EXPECT_THROW(GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(), phis.size()),
                std::invalid_argument);
   EXPECT_THROW(GPUTreeShapInteractions(X, path.begin(), path.end(), 1,
-                                       phis.data().get()),
+                                       phis.data().get(), phis.size()),
+               std::invalid_argument);
+}
+
+TEST(GPUTreeShap, PhisIncorrectLength) {
+  std::vector<PathElement> path = {
+      PathElement(0, -1, 0, 0.0f, 0.0f, false, 0.0, 0.0f)};
+
+  thrust::device_vector<float> data =
+      std::vector<float>({1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f});
+  DenseDatasetWrapper X(data.data().get(), 2, 3);
+  thrust::device_vector<float> phis((X.NumRows() * (X.NumCols() + 1)) - 1);
+  EXPECT_THROW(GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(), phis.size()),
+               std::invalid_argument);
+
+  phis.resize((X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1)) - 1);
+  EXPECT_THROW(GPUTreeShapInteractions(X, path.begin(), path.end(), 1,
+                                       phis.data().get(), phis.size()),
+               std::invalid_argument);
+}
+
+TEST(GPUTreeShap, PhisIncorrectMemory) {
+  std::vector<PathElement> path = {
+      PathElement(0, -1, 0, 0.0f, 0.0f, false, 0.0, 0.0f)};
+  thrust::device_vector<float> data =
+      std::vector<float>({1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f});
+  DenseDatasetWrapper X(data.data().get(), 2, 3);
+  std::vector<float> phis(X.NumRows() * (X.NumCols() + 1));
+  EXPECT_THROW(GPUTreeShap(X, path.begin(), path.end(), 1, phis.data(),
+                           phis.size()),
                std::invalid_argument);
 }
 
@@ -226,7 +257,7 @@ TEST(GPUTreeShap, BasicPaths) {
   DenseDatasetWrapper X(data.data().get(), 2, 3);
   size_t num_trees = 1;
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
-  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get());
+  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(), phis.size());
   thrust::host_vector<float> result(phis);
   // First instance
   EXPECT_NEAR(result[0], 0.6277778f * num_trees, 1e-5);
@@ -261,7 +292,7 @@ TEST(GPUTreeShap, BasicPathsInteractions) {
   size_t num_trees = 1;
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1) *
                                     (X.NumCols() + 1));
-  GPUTreeShapInteractions(X, path.begin(), path.end(), 1, phis.data().get());
+  GPUTreeShapInteractions(X, path.begin(), path.end(), 1, phis.data().get(), phis.size());
   thrust::host_vector<float> result(phis);
   // First instance
   // EXPECT_NEAR(result[0], 0.6277778f * num_trees, 1e-5);
@@ -296,7 +327,7 @@ TEST(GPUTreeShap, BasicPathsWithDuplicates) {
   DenseDatasetWrapper X(data.data().get(), 1, 1);
   size_t num_trees = 1;
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
-  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get());
+  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(), phis.size());
   thrust::host_vector<float> result(phis);
   // First instance
   EXPECT_FLOAT_EQ(result[0], 1.1666666f * num_trees);
