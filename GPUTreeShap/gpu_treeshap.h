@@ -20,6 +20,8 @@
 #include <thrust/device_vector.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/reduce.h>
+#include <thrust/logical.h>
+#include <stdexcept>
 #include <algorithm>
 #include <functional>
 #include <map>
@@ -62,7 +64,19 @@ struct PathElement {
   float v;  // Leaf weight at the end of the path
 };
 
+// Maps values to the phi array according to row, group and column
+__host__ __device__ inline size_t IndexPhi(size_t row_idx, size_t num_groups, size_t group,
+                       size_t num_columns, size_t column_idx) {
+  return (row_idx * num_groups + group) * (num_columns + 1) + column_idx;
+}
+
+__host__ __device__ inline size_t IndexPhiInteractions() { return 0; }
+
 namespace detail {
+// Shorthand for creating a device vector with an appropriate allocator type
+template<class T, class DeviceAllocatorT> using RebindVector = thrust::device_vector<
+      T, typename DeviceAllocatorT::template rebind<T>::other>;
+
 __forceinline__ __device__ unsigned int lanemask32_lt() {
   unsigned int lanemask32_lt;
   asm volatile("mov.u32 %0, %%lanemask_lt;" : "=r"(lanemask32_lt));
@@ -206,9 +220,41 @@ class GroupPath {
   }
 };
 
+
 inline __host__ __device__ size_t DivRoundUp(size_t a, size_t b) {
   return (a + b - 1) / b;
 }
+
+template <typename DatasetT, size_t kBlockSize, size_t kRowsPerWarp>
+void __device__ ConfigureThread(const DatasetT& X, const size_t bins_per_row,
+                            const PathElement* path_elements,
+                            const size_t* bin_segments, size_t* start_row,
+                            size_t* end_row, PathElement* e,
+                            bool* thread_active) {
+  // Partition work
+  // Each warp processes a set of training instances applied to a path
+  size_t tid = kBlockSize * blockIdx.x + threadIdx.x;
+  const size_t warp_size = 32;
+  size_t warp_rank = tid / warp_size;
+  if (warp_rank >= bins_per_row * DivRoundUp(X.NumRows(), kRowsPerWarp)) {
+    *thread_active = false;
+    return;
+  }
+  size_t bin_idx = warp_rank % bins_per_row;
+  size_t bank = warp_rank / bins_per_row;
+  size_t path_start = bin_segments[bin_idx];
+  size_t path_end = bin_segments[bin_idx + 1];
+  uint32_t thread_rank = threadIdx.x % warp_size;
+  if (thread_rank >= path_end - path_start) {
+    *thread_active = false;
+    return;
+  }
+  *e = path_elements[path_start + thread_rank];
+  *start_row = bank * kRowsPerWarp;
+  *end_row = max((bank + 1) * kRowsPerWarp, X.NumRows());
+  *thread_active = true;
+}
+
 #define GPUTREESHAP_MAX_THREADS_PER_BLOCK 256
 
 template <typename DatasetT, size_t kBlockSize, size_t kRowsPerWarp>
@@ -221,30 +267,21 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
   // Each warp processes a training instance applied to a path
   __shared__ DatasetT s_X;
   s_X = X;
-  size_t tid = kBlockSize * blockIdx.x + threadIdx.x;
-  const size_t warp_size = 32;
-  size_t warp_rank = tid / warp_size;
-  if (warp_rank >= bins_per_row * DivRoundUp(s_X.NumRows(), kRowsPerWarp))
-    return;
-  size_t bin_idx = warp_rank % bins_per_row;
-  size_t bank = warp_rank / bins_per_row;
-  size_t path_start = bin_segments[bin_idx];
-  size_t path_end = bin_segments[bin_idx + 1];
-  assert(path_end - path_start <= warp_size);
-  assert(num_groups > 0);
-  uint32_t thread_rank = threadIdx.x % warp_size;
-  if (thread_rank >= path_end - path_start) return;
   __shared__ PathElement s_elements[kBlockSize];
-  s_elements[threadIdx.x] = path_elements[path_start + thread_rank];
-  const PathElement& e = s_elements[threadIdx.x];
+  PathElement& e = s_elements[threadIdx.x];
+
+  size_t start_row, end_row;
+  bool thread_active;
+  ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(
+      s_X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, &e,
+      &thread_active);
+  if (!thread_active) return;
 
   float zero_fraction = e.zero_fraction;
   auto labelled_group = active_labeled_partition(e.path_idx);
   size_t unique_path_length = labelled_group.size();
 
-  for (int64_t row_idx = bank * kRowsPerWarp;
-       row_idx < (bank + 1) * kRowsPerWarp && row_idx < s_X.NumRows();
-       row_idx++) {
+  for (int64_t row_idx = start_row; row_idx < end_row; row_idx++) {
     float one_fraction = GetOneFraction(e, s_X, row_idx);
     GroupPath path(labelled_group, zero_fraction, one_fraction);
 
@@ -256,9 +293,9 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
 
     float sum = path.UnwoundPathSum();
 
-    float* phis_row = &phis[(row_idx * num_groups + e.group) * (s_X.NumCols() + 1)];
     if (e.feature_idx != -1) {
-      atomicAdd(phis_row + e.feature_idx,
+      atomicAdd(&phis[IndexPhi(row_idx, num_groups, e.group, X.NumCols(),
+                               e.feature_idx)],
                 sum * (one_fraction - zero_fraction) * e.v);
     }
   }
@@ -282,6 +319,33 @@ void ComputeShap(
       <<<grid_size, kBlockThreads>>>(
           X, bins_per_row, path_elements.data().get(),
           bin_segments.data().get(), num_groups, phis);
+}
+
+template <typename DatasetT, size_t kBlockSize, size_t kRowsPerWarp>
+__global__ void ShapInteractionsKernel(DatasetT X, size_t bins_per_row,
+                                       const PathElement* path_elements,
+                                       const size_t* bin_segments,
+                                       size_t num_groups, float* phis) {
+}
+
+template <typename DatasetT, typename SizeTAllocatorT, typename PathAllocatorT>
+void ComputeShapInteractions(
+  DatasetT X,
+  const thrust::device_vector<size_t, SizeTAllocatorT>& bin_segments,
+  const thrust::device_vector<PathElement, PathAllocatorT>& path_elements,
+  size_t num_groups, float* phis) {
+  size_t bins_per_row = bin_segments.size() - 1;
+  const int kBlockThreads = GPUTREESHAP_MAX_THREADS_PER_BLOCK;
+  const int warps_per_block = kBlockThreads / 32;
+  const int kRowsPerWarp = 1;
+  size_t warps_needed = bins_per_row * DivRoundUp(X.NumRows(), kRowsPerWarp);
+
+  const uint32_t grid_size = DivRoundUp(warps_needed, warps_per_block);
+
+  ShapInteractionsKernel<DatasetT, kBlockThreads, kRowsPerWarp>
+    <<<grid_size, kBlockThreads>>>(
+      X, bins_per_row, path_elements.data().get(),
+      bin_segments.data().get(), num_groups, phis);
 }
 
 template <typename PathVectorT, typename SizeVectorT, typename DeviceAllocatorT>
@@ -482,7 +546,8 @@ std::vector<size_t> NFBinPacking(
   return bin_map;
 }
 
-template <typename PathVectorT, typename LengthVectorT>
+template <typename DeviceAllocatorT, typename PathVectorT,
+          typename LengthVectorT>
 void GetPathLengths(const PathVectorT& device_paths,
                           LengthVectorT* path_lengths) {
   path_lengths->resize(static_cast<PathElement>(device_paths.back()).path_idx +
@@ -494,8 +559,32 @@ void GetPathLengths(const PathVectorT& device_paths,
     auto path_idx = d_paths[idx].path_idx;
     atomicAdd(d_lengths + path_idx, 1);
   });
+
+  DeviceAllocatorT alloc;
+  auto invalid_length = thrust::any_of(
+      thrust::cuda::par(alloc), path_lengths->begin(), path_lengths->end(),
+      [=] __device__(size_t length) { return length > 32; });
+
+  if (invalid_length) {
+    throw std::invalid_argument("Tree depth must be <= 32");
+  }
 }
 
+template <typename DeviceAllocatorT, typename PathVectorT, typename SizeVectorT>
+void PreprocessPaths(PathVectorT* device_paths, PathVectorT* deduplicated_paths,
+                     SizeVectorT* bin_segments) {
+  // Sort paths by length and feature
+  detail::DeduplicatePaths<PathVectorT, DeviceAllocatorT>(device_paths,
+                                                          deduplicated_paths);
+  using int_vector = RebindVector<int, DeviceAllocatorT>;
+  int_vector path_lengths;
+  detail::GetPathLengths<DeviceAllocatorT>(*deduplicated_paths, &path_lengths);
+  SizeVectorT device_bin_map = detail::BFDBinPacking(path_lengths);
+  detail::SortPaths<PathVectorT, SizeVectorT, DeviceAllocatorT>(
+      deduplicated_paths, device_bin_map);
+  detail::GetBinSegments<PathVectorT, SizeVectorT, DeviceAllocatorT>(
+      *deduplicated_paths, device_bin_map, bin_segments);
+}
 
 struct PathIdxTransformOp {
   __device__ size_t operator()(const PathElement& e) { return e.path_idx; }
@@ -513,11 +602,11 @@ struct BiasTransformOp {
 
 // While it is possible to compute bias in the primary kernel, we do it here
 // using double precision to avoid numerical stability issues
-template <typename PathVectorT, typename DeviceAllocatorT>
-void ComputeBias(const PathVectorT& device_paths,
-                 thrust::device_vector<double, DeviceAllocatorT>* bias,
-                 size_t num_groups) {
-  bias->resize(num_groups, 0.0);
+template <typename DatasetT, typename PathVectorT, typename DoubleVectorT, typename DeviceAllocatorT>
+void ComputeBias(DatasetT X, const PathVectorT& device_paths, size_t num_groups,
+                 DoubleVectorT* bias) {
+  using double_vector = thrust::device_vector<
+      double, typename DeviceAllocatorT::template rebind<double>::other>;
   PathVectorT sorted_paths(device_paths);
   DeviceAllocatorT alloc;
   // Make sure groups are contiguous
@@ -548,8 +637,6 @@ void ComputeBias(const PathVectorT& device_paths,
   // Combine bias for each path, over each group
   using size_vector = thrust::device_vector<
       size_t, typename DeviceAllocatorT::template rebind<size_t>::other>;
-  using double_vector = thrust::device_vector<
-      double, typename DeviceAllocatorT::template rebind<double>::other>;
   size_vector keys_out(num_paths);
   double_vector values_out(num_paths);
   auto group_key =
@@ -573,6 +660,7 @@ void ComputeBias(const PathVectorT& device_paths,
 }
 
 };  // namespace detail
+
 
 /*!
  * Compute feature contributions on the GPU given a set of unique paths through a tree ensemble
@@ -611,42 +699,87 @@ template <typename DeviceAllocatorT = thrust::device_allocator<int>,
 void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
                  size_t num_groups, float* phis_out) {
   if (X.NumRows() == 0 || X.NumCols() == 0 || end - begin <= 0) return;
-  using size_vector = thrust::device_vector<
-      size_t, typename DeviceAllocatorT::template rebind<size_t>::other>;
-  using int_vector = thrust::device_vector<
-      int, typename DeviceAllocatorT::template rebind<int>::other>;
-  using double_vector = thrust::device_vector<
-      double, typename DeviceAllocatorT::template rebind<double>::other>;
-  using path_vector = thrust::device_vector<
-      PathElement,
-      typename DeviceAllocatorT::template rebind<PathElement>::other>;
+  using size_vector = detail::RebindVector<size_t, DeviceAllocatorT>;
+  using double_vector = detail::RebindVector<double, DeviceAllocatorT>;
+  using path_vector = detail::RebindVector<PathElement, DeviceAllocatorT>;
 
   // Compute the global bias
   path_vector device_paths(begin, end);
-  double_vector bias;
-  detail::ComputeBias(device_paths, &bias, num_groups);
+  double_vector bias(num_groups, 0.0);
+  detail::ComputeBias<DatasetT, path_vector, double_vector, DeviceAllocatorT>(
+      X, device_paths, num_groups, &bias);
   auto d_bias = bias.data().get();
   thrust::for_each_n(thrust::make_counting_iterator(0llu),
                      X.NumRows() * num_groups, [=] __device__(size_t idx) {
                        size_t group = idx % num_groups;
-                       phis_out[(idx + 1) * (X.NumCols() + 1) - 1]  +=
+                       size_t row_idx = idx / num_groups;
+                       phis_out[IndexPhi(row_idx, num_groups, group,
+                                         X.NumCols(), X.NumCols())] +=
                            d_bias[group];
                      });
 
   path_vector deduplicated_paths;
-  // Sort paths by length and feature
-  detail::DeduplicatePaths<path_vector, DeviceAllocatorT>(&device_paths,
-                                                          &deduplicated_paths);
-  int_vector path_lengths;
-  detail::GetPathLengths(deduplicated_paths, &path_lengths);
-  size_vector device_bin_map = detail::BFDBinPacking(path_lengths);
-  detail::SortPaths<path_vector, size_vector, DeviceAllocatorT>(
-      &deduplicated_paths, device_bin_map);
   size_vector device_bin_segments;
-  detail::GetBinSegments<path_vector, size_vector, DeviceAllocatorT>(
-      deduplicated_paths, device_bin_map, &device_bin_segments);
+  detail::PreprocessPaths<DeviceAllocatorT>(&device_paths, &deduplicated_paths,
+                                            &device_bin_segments);
+
   detail::ComputeShap(X, device_bin_segments, deduplicated_paths, num_groups,
                       phis_out);
 }
 
+/*!
+ * Compute feature interaction contributions on the GPU given a set of unique paths through a tree
+ * ensemble and a dataset. Uses device memory proportional to the tree ensemble size.
+ *
+ * \tparam  DeviceAllocatorT  Optional thrust style allocator.
+ *
+ * \param           X           Thin wrapper over a dataset allocated in device memory. X should be
+ *                              trivially copyable as a kernel parameter (i.e. contain only pointers
+ *                              to actual data) and must implement the methods
+ *                              NumRows()/NumCols()/GetElement(size_t row_idx, size_t col_idx) as
+ *                              __device__ functions. GetElement may return NaN where the feature
+ *                              value is missing.
+ * \param           begin       Iterator to paths, where separate paths are delineated by
+ *                              PathElement.path_idx. Each unique path should contain 1 root with
+ *                              feature_idx = -1 and zero_fraction = 1.0. The ordering of path
+ *                              elements inside a unique path does not matter - the result will be
+ *                              the same. Paths may contain duplicate features. See the PathElement
+ *                              class for more information.
+ * \param           end         Path end iterator.
+ * \param           num_groups  Number of output groups. In multiclass classification the algorithm
+ *                              outputs feature contributions per output class.
+ * \param [in,out]  phis_out    Device memory buffer for returning the feature interaction
+ *                              contributions. Must be of size X.NumRows() * (X.NumCols() + 1) *
+ *                              (X.NumCols() + 1) * num_groups. The last feature column contains the
+ *                              bias term. Results are added to the input buffer without zeroing
+ *                              memory - do not pass uninitialised memory.
+ *
+ * \tparam  DatasetT  User-specified dataset container.
+ *
+ * \tparam  PathIteratorT Thrust type iterator, may be thrust::device_ptr for device memory, or stl
+ *                        iterator/raw pointer for host memory.
+ */
+template <typename DeviceAllocatorT = thrust::device_allocator<int>,
+          typename DatasetT, typename PathIteratorT>
+void GPUTreeShapInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
+                             size_t num_groups, float* phis_out) {
+  if (X.NumRows() == 0 || X.NumCols() == 0 || end - begin <= 0) return;
+  using size_vector = detail::RebindVector<size_t, DeviceAllocatorT>;
+  using double_vector = detail::RebindVector<double, DeviceAllocatorT>;
+  using path_vector = detail::RebindVector<PathElement, DeviceAllocatorT>;
+
+  // Compute the global bias
+  path_vector device_paths(begin, end);
+  double_vector bias(num_groups, 0.0);
+  detail::ComputeBias<DatasetT, path_vector, double_vector, DeviceAllocatorT>(
+      X, device_paths, num_groups, &bias);
+
+  path_vector deduplicated_paths;
+  size_vector device_bin_segments;
+  detail::PreprocessPaths<DeviceAllocatorT>(&device_paths, &deduplicated_paths,
+                                            &device_bin_segments);
+
+  detail::ComputeShapInteractions(X, device_bin_segments, deduplicated_paths, num_groups,
+                      phis_out);
+}
 };  // namespace gpu_treeshap
