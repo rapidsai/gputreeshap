@@ -19,6 +19,7 @@
 #include <limits>
 #include <random>
 #include <vector>
+#include <cooperative_groups.h>
 #include "../GPUTreeShap/gpu_treeshap.h"
 
 using namespace gpu_treeshap;  // NOLINT
@@ -43,9 +44,9 @@ class TestDataset {
  public:
   std::vector<float> host_data;
   thrust::device_vector<float> device_data;
-  int num_rows;
-  int num_cols;
-  TestDataset(int num_rows, int num_cols, size_t seed)
+  size_t num_rows;
+  size_t num_cols;
+  TestDataset(size_t num_rows, size_t num_cols, size_t seed)
       : num_rows(num_rows), num_cols(num_cols) {
     std::mt19937 gen(seed);
     std::uniform_real_distribution<float> dis;
@@ -99,7 +100,7 @@ std::vector<PathElement> GenerateEnsembleModel(size_t num_groups,
                                                size_t num_paths, size_t seed) {
   std::mt19937 gen(seed);
   std::vector<PathElement> model;
-  for (int group = 0; group < num_groups; group++) {
+  for (auto group = 0llu; group < num_groups; group++) {
     GenerateModel(&model, group, max_depth, num_features, num_paths, gen);
   }
   return model;
@@ -289,7 +290,6 @@ TEST(GPUTreeShap, BasicPathsInteractions) {
       {3, 0, 0, -inf, 0.5f, false, 0.4f, -1.0f}};
   thrust::device_vector<float> data = std::vector<float>({1.0f, 1.0f, 0.0f});
   DenseDatasetWrapper X(data.data().get(), 1, 3);
-  size_t num_trees = 1;
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1) *
                                     (X.NumCols() + 1));
   GPUTreeShapInteractions(X, path.begin(), path.end(), 1, phis.data().get(), phis.size());

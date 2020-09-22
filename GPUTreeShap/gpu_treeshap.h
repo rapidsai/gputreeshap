@@ -15,7 +15,6 @@
  */
 
 #pragma once
-#include <cooperative_groups.h>
 #include <thrust/device_allocator.h>
 #include <thrust/device_vector.h>
 #include <thrust/iterator/discard_iterator.h>
@@ -24,7 +23,6 @@
 #include <stdexcept>
 #include <algorithm>
 #include <functional>
-#include <map>
 #include <utility>
 #include <vector>
 #include <set>
@@ -73,6 +71,7 @@ __host__ __device__ inline size_t IndexPhi(size_t row_idx, size_t num_groups, si
 __host__ __device__ inline size_t IndexPhiInteractions() { return 0; }
 
 namespace detail {
+
 // Shorthand for creating a device vector with an appropriate allocator type
 template<class T, class DeviceAllocatorT> using RebindVector = thrust::device_vector<
       T, typename DeviceAllocatorT::template rebind<T>::other>;
@@ -81,6 +80,10 @@ template <typename PtrT>
 bool IsDeviceAccessible(PtrT ptr) {
   cudaPointerAttributes attributes;
   cudaPointerGetAttributes(&attributes, ptr);
+  auto error = cudaGetLastError();
+  if (error == cudaErrorInvalidValue) {
+    return false;
+  }
   return attributes.type != cudaMemoryTypeUnregistered;
 }
 
@@ -553,6 +556,10 @@ std::vector<size_t> NFBinPacking(
   return bin_map;
 }
 
+struct PathTooLongOp {
+  __device__ size_t operator()(size_t length) { return length > 32; }
+};
+
 template <typename DeviceAllocatorT, typename PathVectorT,
           typename LengthVectorT>
 void GetPathLengths(const PathVectorT& device_paths,
@@ -568,9 +575,9 @@ void GetPathLengths(const PathVectorT& device_paths,
   });
 
   DeviceAllocatorT alloc;
+  PathTooLongOp op;
   auto invalid_length = thrust::any_of(
-      thrust::cuda::par(alloc), path_lengths->begin(), path_lengths->end(),
-      [=] __device__(size_t length) { return length > 32; });
+      thrust::cuda::par(alloc), path_lengths->begin(), path_lengths->end(), op);
 
   if (invalid_length) {
     throw std::invalid_argument("Tree depth must be <= 32");
@@ -609,9 +616,9 @@ struct BiasTransformOp {
 
 // While it is possible to compute bias in the primary kernel, we do it here
 // using double precision to avoid numerical stability issues
-template <typename DatasetT, typename PathVectorT, typename DoubleVectorT, typename DeviceAllocatorT>
-void ComputeBias(DatasetT X, const PathVectorT& device_paths, size_t num_groups,
-                 DoubleVectorT* bias) {
+template <typename PathVectorT, typename DoubleVectorT,
+          typename DeviceAllocatorT>
+void ComputeBias(const PathVectorT& device_paths, DoubleVectorT* bias) {
   using double_vector = thrust::device_vector<
       double, typename DeviceAllocatorT::template rebind<double>::other>;
   PathVectorT sorted_paths(device_paths);
@@ -726,8 +733,8 @@ void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
   // Compute the global bias
   path_vector device_paths(begin, end);
   double_vector bias(num_groups, 0.0);
-  detail::ComputeBias<DatasetT, path_vector, double_vector, DeviceAllocatorT>(
-      X, device_paths, num_groups, &bias);
+  detail::ComputeBias<path_vector, double_vector, DeviceAllocatorT>(
+      device_paths, &bias);
   auto d_bias = bias.data().get();
   thrust::for_each_n(thrust::make_counting_iterator(0llu),
                      X.NumRows() * num_groups, [=] __device__(size_t idx) {
@@ -804,8 +811,8 @@ void GPUTreeShapInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
   // Compute the global bias
   path_vector device_paths(begin, end);
   double_vector bias(num_groups, 0.0);
-  detail::ComputeBias<DatasetT, path_vector, double_vector, DeviceAllocatorT>(
-      X, device_paths, num_groups, &bias);
+  detail::ComputeBias<path_vector, double_vector, DeviceAllocatorT>(
+      device_paths, &bias);
 
   path_vector deduplicated_paths;
   size_vector device_bin_segments;
