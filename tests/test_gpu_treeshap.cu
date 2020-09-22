@@ -17,7 +17,9 @@
 #include <GPUTreeShap/gpu_treeshap.h>
 #include <gtest/gtest.h>
 #include <limits>
+#include <random>
 #include <vector>
+#include <cooperative_groups.h>
 #include "../GPUTreeShap/gpu_treeshap.h"
 
 using namespace gpu_treeshap;  // NOLINT
@@ -37,6 +39,202 @@ class DenseDatasetWrapper {
   __host__ __device__ size_t NumRows() const { return num_rows; }
   __host__ __device__ size_t NumCols() const { return num_cols; }
 };
+
+class TestDataset {
+ public:
+  std::vector<float> host_data;
+  thrust::device_vector<float> device_data;
+  size_t num_rows;
+  size_t num_cols;
+  TestDataset(size_t num_rows, size_t num_cols, size_t seed)
+      : num_rows(num_rows), num_cols(num_cols) {
+    std::mt19937 gen(seed);
+    std::uniform_real_distribution<float> dis;
+    host_data.resize(num_rows * num_cols);
+    for (auto& e : host_data) {
+      e = dis(gen);
+    }
+    device_data = host_data;
+  }
+  DenseDatasetWrapper GetDeviceWrapper() {
+    return DenseDatasetWrapper(device_data.data().get(), num_rows, num_cols);
+  }
+};
+
+void GenerateModel(std::vector<PathElement>* model, int group, size_t max_depth,
+                   size_t num_features, size_t num_paths, std::mt19937& gen) {
+  std::uniform_real_distribution<float> float_dis;
+  std::uniform_int_distribution<int64_t> feature_dis(0, num_features - 1);
+  std::bernoulli_distribution bern_dis;
+  const float inf = std::numeric_limits<float>::infinity();
+  size_t base_path_idx = model->empty() ? 0 : model->back().path_idx + 1;
+  float z = std::pow(0.5, 1.0 / max_depth);
+  for (auto i = 0ull; i < num_paths; i++) {
+    float v = float_dis(gen);
+    model->emplace_back(
+        PathElement{base_path_idx + i, -1, group, -inf, inf, false, 1.0, v});
+    for (auto j = 0ull; j < max_depth; j++) {
+      float lower_bound = -inf;
+      float upper_bound = inf;
+      // If the input feature value x_i is a uniform rv in [0,1)
+      // We want a 50% chance of it reaching the end of this path
+      // Each test should succeed with probability 0.5^(1/max_depth)
+      std::uniform_real_distribution<float> bound_dis(0.0, 2.0 - 2 * z);
+      if (bern_dis(gen)) {
+        lower_bound = bound_dis(gen);
+      } else {
+        upper_bound = 1.0f - bound_dis(gen);
+      }
+      // Don't make the zero fraction too small
+      std::uniform_real_distribution<float> zero_fraction_dis(0.05, 1.0);
+      model->emplace_back(
+          PathElement{base_path_idx + i, feature_dis(gen), group, lower_bound,
+                      upper_bound, bern_dis(gen), zero_fraction_dis(gen), v});
+    }
+  }
+}
+
+std::vector<PathElement> GenerateEnsembleModel(size_t num_groups,
+                                               size_t max_depth,
+                                               size_t num_features,
+                                               size_t num_paths, size_t seed) {
+  std::mt19937 gen(seed);
+  std::vector<PathElement> model;
+  for (auto group = 0llu; group < num_groups; group++) {
+    GenerateModel(&model, group, max_depth, num_features, num_paths, gen);
+  }
+  return model;
+}
+
+std::vector<float> Predict(const std::vector<PathElement>& model,
+                           const TestDataset& X, size_t num_groups) {
+  std::vector<float> predictions(X.num_rows * num_groups);
+  for (auto i = 0ull; i < X.num_rows; i++) {
+    const float* row = X.host_data.data() + i * X.num_cols;
+    float current_v = model.front().v;
+    size_t current_path_idx = model.front().path_idx;
+    int current_group = model.front().group;
+    bool valid = true;
+    for (const auto& e : model) {
+      if (e.path_idx != current_path_idx) {
+        if (valid) {
+          predictions[i * num_groups + current_group] += current_v;
+        }
+        current_v = e.v;
+        current_path_idx = e.path_idx;
+        current_group = e.group;
+        valid = true;
+      }
+
+      if (e.feature_idx != -1) {
+        float fval = row[e.feature_idx];
+        if (fval < e.feature_lower_bound || fval >= e.feature_upper_bound) {
+          valid = false;
+        }
+      }
+    }
+    if (valid) {
+      predictions[i * num_groups + current_group] += current_v;
+    }
+  }
+
+  return predictions;
+}
+
+class ShapSumTest : public ::testing::TestWithParam<
+                        std::tuple<size_t, size_t, size_t, size_t, size_t>> {};
+
+TEST_P(ShapSumTest, ShapSum) {
+  size_t num_rows, num_features, num_groups, max_depth, num_paths;
+  std::tie(num_rows, num_features, num_groups, max_depth, num_paths) =
+      GetParam();
+  auto model =
+      GenerateEnsembleModel(num_groups, max_depth, num_features, num_paths, 78);
+  TestDataset test_data(num_rows, num_features, 22);
+  auto margin = Predict(model, test_data, num_groups);
+
+  auto X = test_data.GetDeviceWrapper();
+
+  thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1) *
+                                    num_groups);
+  GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.data().get(), phis.size());
+  thrust::host_vector<float> result(phis);
+  std::vector<float> sum(num_rows * num_groups);
+  for (auto i = 0ull; i < num_rows; i++) {
+    for (auto j = 0ull; j < num_features + 1; j++) {
+      for (auto group = 0ull; group < num_groups; group++) {
+        size_t result_index = IndexPhi(i, num_groups, group, num_features, j);
+        sum[i * num_groups + group] += result[result_index];
+      }
+    }
+  }
+  for (auto i = 0ull; i < sum.size(); i++) {
+    ASSERT_NEAR(sum[i], margin[i], 1e-3);
+  }
+}
+
+// Generate a bunch of random models and check the shap results sum up to the
+// predictions
+INSTANTIATE_TEST_CASE_P(
+    GPUTreeShapInstantiation, ShapSumTest,
+    testing::Combine(testing::Values(1, 10, 100, 1000),
+                     testing::Values(1, 5, 8, 64), testing::Values(1, 5),
+                     testing::Values(1, 8, 20), testing::Values(10)),
+    [](const testing::TestParamInfo<ShapSumTest::ParamType>& info) {
+      std::string name = "nrow" + std::to_string(std::get<0>(info.param)) + "_";
+      name += "nfeat" + std::to_string(std::get<1>(info.param)) + "_";
+      name += "ngroup" + std::to_string(std::get<2>(info.param)) + "_";
+      name += "mdepth" + std::to_string(std::get<3>(info.param)) + "_";
+      name += "npaths" + std::to_string(std::get<4>(info.param));
+      return name;
+    });
+
+TEST(GPUTreeShap, PathTooLong) {
+  std::vector<gpu_treeshap::PathElement> path(33);
+  path[0] = gpu_treeshap::PathElement(0, -1, 0, 0, 0, 0, 0, 0);
+  for (auto i = 1ull; i < path.size(); i++) {
+    path[i] = gpu_treeshap::PathElement(0, i, 0, 0, 0, 0, 0, 0);
+  }
+
+  thrust::device_vector<float> data =
+      std::vector<float>({1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f});
+  DenseDatasetWrapper X(data.data().get(), 2, 3);
+  thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
+  EXPECT_THROW(GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(), phis.size()),
+               std::invalid_argument);
+  EXPECT_THROW(GPUTreeShapInteractions(X, path.begin(), path.end(), 1,
+                                       phis.data().get(), phis.size()),
+               std::invalid_argument);
+}
+
+TEST(GPUTreeShap, PhisIncorrectLength) {
+  std::vector<PathElement> path = {
+      PathElement(0, -1, 0, 0.0f, 0.0f, false, 0.0, 0.0f)};
+
+  thrust::device_vector<float> data =
+      std::vector<float>({1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f});
+  DenseDatasetWrapper X(data.data().get(), 2, 3);
+  thrust::device_vector<float> phis((X.NumRows() * (X.NumCols() + 1)) - 1);
+  EXPECT_THROW(GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(), phis.size()),
+               std::invalid_argument);
+
+  phis.resize((X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1)) - 1);
+  EXPECT_THROW(GPUTreeShapInteractions(X, path.begin(), path.end(), 1,
+                                       phis.data().get(), phis.size()),
+               std::invalid_argument);
+}
+
+TEST(GPUTreeShap, PhisIncorrectMemory) {
+  std::vector<PathElement> path = {
+      PathElement(0, -1, 0, 0.0f, 0.0f, false, 0.0, 0.0f)};
+  thrust::device_vector<float> data =
+      std::vector<float>({1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f});
+  DenseDatasetWrapper X(data.data().get(), 2, 3);
+  std::vector<float> phis(X.NumRows() * (X.NumCols() + 1));
+  EXPECT_THROW(GPUTreeShap(X, path.begin(), path.end(), 1, phis.data(),
+                           phis.size()),
+               std::invalid_argument);
+}
 
 // Test a simple tree and compare output to hand computed values
 TEST(GPUTreeShap, BasicPaths) {
@@ -60,7 +258,7 @@ TEST(GPUTreeShap, BasicPaths) {
   DenseDatasetWrapper X(data.data().get(), 2, 3);
   size_t num_trees = 1;
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
-  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get());
+  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(), phis.size());
   thrust::host_vector<float> result(phis);
   // First instance
   EXPECT_NEAR(result[0], 0.6277778f * num_trees, 1e-5);
@@ -72,6 +270,40 @@ TEST(GPUTreeShap, BasicPaths) {
   EXPECT_NEAR(result[5], -1.005555f * num_trees, 1e-5);
   EXPECT_NEAR(result[6], 0.0611111f * num_trees, 1e-5);
   EXPECT_NEAR(result[7], -0.3f * num_trees, 1e-5);
+}
+
+TEST(GPUTreeShap, BasicPathsInteractions) {
+  const float inf = std::numeric_limits<float>::infinity();
+  std::vector<gpu_treeshap::PathElement> path{
+      gpu_treeshap::PathElement{0, -1, 0, -inf, inf, false, 1.0f, 0.5f},
+      {0, 0, 0, 0.5f, inf, false, 0.6f, 0.5f},
+      {0, 1, 0, 0.5f, inf, false, 2.0f / 3, 0.5f},
+      {0, 2, 0, 0.5f, inf, false, 0.5f, 0.5f},
+      {1, -1, 0, -inf, 0.0f, false, 1.0f, 1.0f},
+      {1, 0, 0, 0.5f, inf, false, 0.6f, 1.0f},
+      {1, 1, 0, 0.5f, inf, false, 2.0f / 3, 1.0f},
+      {1, 2, 0, -inf, 0.5f, false, 0.5f, 1.0f},
+      {2, -1, 0, -inf, 0.0f, false, 1.0f, -1},
+      {2, 0, 0, 0.5f, inf, false, 0.6f, -1.0f},
+      {2, 1, 0, -inf, 0.5f, false, 1.0f / 3, -1.0f},
+      {3, -1, 0, -inf, 0.0f, false, 1.0f, -1.0f},
+      {3, 0, 0, -inf, 0.5f, false, 0.4f, -1.0f}};
+  thrust::device_vector<float> data = std::vector<float>({1.0f, 1.0f, 0.0f});
+  DenseDatasetWrapper X(data.data().get(), 1, 3);
+  thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1) *
+                                    (X.NumCols() + 1));
+  GPUTreeShapInteractions(X, path.begin(), path.end(), 1, phis.data().get(), phis.size());
+  thrust::host_vector<float> result(phis);
+  // First instance
+  // EXPECT_NEAR(result[0], 0.6277778f * num_trees, 1e-5);
+  // EXPECT_NEAR(result[1], 0.5027776f * num_trees, 1e-5);
+  // EXPECT_NEAR(result[2], 0.1694444f * num_trees, 1e-5);
+  // EXPECT_NEAR(result[3], -0.3f * num_trees, 1e-5);
+  //// Second instance
+  // EXPECT_NEAR(result[4], 0.24444449f * num_trees, 1e-5);
+  // EXPECT_NEAR(result[5], -1.005555f * num_trees, 1e-5);
+  // EXPECT_NEAR(result[6], 0.0611111f * num_trees, 1e-5);
+  // EXPECT_NEAR(result[7], -0.3f * num_trees, 1e-5);
 }
 
 // Test a tree with features occurring multiple times in a path
@@ -95,7 +327,7 @@ TEST(GPUTreeShap, BasicPathsWithDuplicates) {
   DenseDatasetWrapper X(data.data().get(), 1, 1);
   size_t num_trees = 1;
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
-  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get());
+  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(), phis.size());
   thrust::host_vector<float> result(phis);
   // First instance
   EXPECT_FLOAT_EQ(result[0], 1.1666666f * num_trees);
