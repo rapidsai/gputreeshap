@@ -46,13 +46,15 @@ class TestDataset {
   thrust::device_vector<float> device_data;
   size_t num_rows;
   size_t num_cols;
-  TestDataset(size_t num_rows, size_t num_cols, size_t seed)
+  TestDataset(size_t num_rows, size_t num_cols, size_t seed,
+              float missing_fraction = 0.25)
       : num_rows(num_rows), num_cols(num_cols) {
     std::mt19937 gen(seed);
     std::uniform_real_distribution<float> dis;
+    std::bernoulli_distribution bern(missing_fraction);
     host_data.resize(num_rows * num_cols);
     for (auto& e : host_data) {
-      e = dis(gen);
+      e = bern(gen) ? std::numeric_limits<float>::quiet_NaN() : dis(gen);
     }
     device_data = host_data;
   }
@@ -128,7 +130,10 @@ std::vector<float> Predict(const std::vector<PathElement>& model,
 
       if (e.feature_idx != -1) {
         float fval = row[e.feature_idx];
-        if (fval < e.feature_lower_bound || fval >= e.feature_upper_bound) {
+        if (std::isnan(fval)) {
+          valid = valid && e.is_missing_branch;
+        } else if (fval < e.feature_lower_bound ||
+                   fval >= e.feature_upper_bound) {
           valid = false;
         }
       }
@@ -160,6 +165,7 @@ TEST_P(ShapSumTest, ShapSum) {
   GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.data().get(),
               phis.size());
   thrust::host_vector<float> result(phis);
+  std::vector<float > tmp(result.begin(), result.end());
   std::vector<float> sum(num_rows * num_groups);
   for (auto i = 0ull; i < num_rows; i++) {
     for (auto j = 0ull; j < num_features + 1; j++) {
@@ -232,7 +238,7 @@ size_t test_num_rows[] = {1, 10, 100, 1000};
 size_t test_num_features[] = {1, 5, 8, 31};
 size_t test_num_groups[] = {1, 5};
 size_t test_max_depth[] = {1, 8, 20};
-size_t test_num_paths[] = {10};
+size_t test_num_paths[] = {1, 10};
 INSTANTIATE_TEST_CASE_P(ShapInstantiation, ShapSumTest,
                         testing::Combine(testing::ValuesIn(test_num_rows),
                                          testing::ValuesIn(test_num_features),
