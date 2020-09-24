@@ -297,7 +297,14 @@ TEST(GPUTreeShap, PhisIncorrectMemory) {
       std::invalid_argument);
 }
 
-// Test a simple tree and compare output to hand computed values
+// Test a simple tree and compare output to xgb shap values
+// 0:[f0<0.5] yes=1,no=2,missing=1,gain=1.63333321,cover=5
+//  1:leaf=-1,cover=2
+//  2:[f1<0.5] yes=3,no=4,missing=3,gain=2.04166675,cover=3
+//    3:leaf=-1,cover=1
+//    4:[f2<0.5] yes=5,no=6,missing=5,gain=0.125,cover=2
+//      5:leaf=1,cover=1
+//      6:leaf=0.5,cover=1
 TEST(GPUTreeShap, BasicPaths) {
   const float inf = std::numeric_limits<float>::infinity();
   std::vector<PathElement> path{
