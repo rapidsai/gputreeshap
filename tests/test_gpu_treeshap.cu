@@ -64,7 +64,7 @@ class TestDataset {
 };
 
 void GenerateModel(std::vector<PathElement>* model, int group, size_t max_depth,
-                   size_t num_features, size_t num_paths, std::mt19937& gen) {
+                   size_t num_features, size_t num_paths, std::mt19937* gen) {
   std::uniform_real_distribution<float> float_dis;
   std::uniform_int_distribution<int64_t> feature_dis(0, num_features - 1);
   std::bernoulli_distribution bern_dis;
@@ -72,7 +72,7 @@ void GenerateModel(std::vector<PathElement>* model, int group, size_t max_depth,
   size_t base_path_idx = model->empty() ? 0 : model->back().path_idx + 1;
   float z = std::pow(0.5, 1.0 / max_depth);
   for (auto i = 0ull; i < num_paths; i++) {
-    float v = float_dis(gen);
+    float v = float_dis(*gen);
     model->emplace_back(
         PathElement{base_path_idx + i, -1, group, -inf, inf, false, 1.0, v});
     for (auto j = 0ull; j < max_depth; j++) {
@@ -82,16 +82,16 @@ void GenerateModel(std::vector<PathElement>* model, int group, size_t max_depth,
       // We want a 50% chance of it reaching the end of this path
       // Each test should succeed with probability 0.5^(1/max_depth)
       std::uniform_real_distribution<float> bound_dis(0.0, 2.0 - 2 * z);
-      if (bern_dis(gen)) {
-        lower_bound = bound_dis(gen);
+      if (bern_dis(*gen)) {
+        lower_bound = bound_dis(*gen);
       } else {
-        upper_bound = 1.0f - bound_dis(gen);
+        upper_bound = 1.0f - bound_dis(*gen);
       }
       // Don't make the zero fraction too small
       std::uniform_real_distribution<float> zero_fraction_dis(0.05, 1.0);
       model->emplace_back(
-          PathElement{base_path_idx + i, feature_dis(gen), group, lower_bound,
-                      upper_bound, bern_dis(gen), zero_fraction_dis(gen), v});
+          PathElement{base_path_idx + i, feature_dis(*gen), group, lower_bound,
+                      upper_bound, bern_dis(*gen), zero_fraction_dis(*gen), v});
     }
   }
 }
@@ -103,7 +103,7 @@ std::vector<PathElement> GenerateEnsembleModel(size_t num_groups,
   std::mt19937 gen(seed);
   std::vector<PathElement> model;
   for (auto group = 0llu; group < num_groups; group++) {
-    GenerateModel(&model, group, max_depth, num_features, num_paths, gen);
+    GenerateModel(&model, group, max_depth, num_features, num_paths, &gen);
   }
   return model;
 }
