@@ -796,3 +796,32 @@ TEST(GPUTreeShap, ContiguousGroup) {
   TestContiguousGroup<<<1, 32>>>();
   EXPECT_EQ(cudaDeviceSynchronize(), 0);
 }
+
+TEST(GPUTreeShap, ShapDeterminism) {
+  size_t num_rows = 1000;
+  size_t num_features = 100;
+  size_t num_groups = 10;
+  size_t max_depth = 10;
+  size_t num_paths = 100;
+  size_t samples = 10;
+  auto model =
+      GenerateEnsembleModel(num_groups, max_depth, num_features, num_paths, 78);
+  TestDataset test_data(num_rows, num_features, 22);
+
+  auto X = test_data.GetDeviceWrapper();
+
+  thrust::device_vector<float> reference_phis(X.NumRows() * (X.NumCols() + 1) *
+                                              num_groups);
+  GPUTreeShap(X, model.begin(), model.end(), num_groups,
+              reference_phis.data().get(), reference_phis.size());
+
+  for (auto i = 0ull; i < samples; i++) {
+    thrust::device_vector<float> phis(reference_phis.size());
+    GPUTreeShap(X, model.begin(), model.end(), num_groups,
+                phis.data().get(), phis.size());
+    printf("%f %f\n",float (phis[0]),float (reference_phis[0]));
+    ASSERT_TRUE(thrust::equal(reference_phis.begin(), reference_phis.end(),
+                              phis.begin()));
+  }
+}
+
