@@ -75,10 +75,13 @@ class Model:
 
 
 def check_accuracy(shap, margin):
-    if not np.allclose(np.sum(shap, axis=len(shap.shape) - 1), margin, 1e-1, 1e-1):
+    if len(shap.shape) == 2:
+        sum = np.sum(shap, axis=len(shap.shape) - 1)
+    else:
+        sum = np.sum(shap, axis=(len(shap.shape) - 1, len(shap.shape) - 2))
+
+    if not np.allclose(sum, margin, 1e-1, 1e-1):
         print("Warning: Failed 1e-1 accuracy")
-    if not np.allclose(np.sum(shap, axis=len(shap.shape) - 1), margin, 1e-3, 1e-3):
-        print("Warning: Failed 1e-3 accuracy")
 
 
 def get_models(args):
@@ -93,13 +96,13 @@ def get_models(args):
     models = []
     for d in test_datasets:
         small_name = d.name + "-small"
-        if small_name in args.model or args.model == "all":
+        if small_name in args.model or args.model == "all" or args.model == "small":
             models.append(Model(small_name, d, 10, 3))
         med_name = d.name + "-med"
-        if med_name in args.model or args.model == "all":
+        if med_name in args.model or args.model == "all"or args.model == "med":
             models.append(Model(med_name, d, 100, 8))
         large_name = d.name + "-large"
-        if large_name in args.model or args.model == "all":
+        if large_name in args.model or args.model == "all"or args.model == "large":
             models.append(Model(large_name, d, 1000, 16))
     return models
 
@@ -123,7 +126,8 @@ def run_benchmark(args):
     models = get_models(args)
     print_model_stats(models, args)
 
-    predictors = ["cpu_predictor", "gpu_predictor"]
+    # predictors = ["cpu_predictor", "gpu_predictor"]
+    predictors = ["gpu_predictor"]
     test_rows = args.nrows
     df = pd.DataFrame(
         columns=["model", "test_rows", "cpu_time(s)", "cpu_std", "gpu_time(s)", "gpu_std",
@@ -136,7 +140,10 @@ def run_benchmark(args):
             samples = []
             for i in range(args.niter):
                 start = time.perf_counter()
-                xgb_shap = m.xgb_model.predict(dtest, pred_contribs=True)
+                if args.interactions:
+                    xgb_shap = m.xgb_model.predict(dtest, pred_interactions=True)
+                else:
+                    xgb_shap = m.xgb_model.predict(dtest, pred_contribs=True)
                 samples.append(time.perf_counter() - start)
             if p is "gpu_predictor":
                 result_row["gpu_time(s)"] = np.mean(samples)
@@ -170,7 +177,9 @@ parser.add_argument("-format", default="text", type=str,
                     help="Format of output tables. E.g. text,latex,csv")
 
 parser.add_argument("-out", default="results.csv", type=str)
+parser.add_argument("-interactions", default=False, type=bool)
 parser.add_argument("-out_models", default="models.csv", type=str)
+
 
 args = parser.parse_args()
 run_benchmark(args)

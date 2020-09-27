@@ -380,22 +380,17 @@ __device__ float  ComputePhiCondition(const PathElement& e, size_t row_idx,
 
 // If there is a feature in the path we are conditioning on, swap it to the end
 // of the path
-inline __device__ bool SwapConditionedElement(PathElement**e,
-    PathElement* s_elements, int64_t condition_feature,
-    const ContiguousGroup& group) {
-  *e = &s_elements[threadIdx.x];
-  uint32_t ballot = group.ballot((*e)->feature_idx == condition_feature);
-  if (ballot) {
-    auto condition_rank = __ffs(ballot) - 1;
-    auto last_rank = group.size() - 1;
-    auto this_rank = group.thread_rank();
-    if (this_rank == last_rank) {
-      *e = &s_elements[(threadIdx.x - this_rank) + condition_rank];
-    } else if (this_rank == condition_rank) {
-      *e = &s_elements[(threadIdx.x - this_rank) + last_rank];
-    }
+inline __device__ void SwapConditionedElement(PathElement** e,
+                                              PathElement* s_elements,
+                                              uint32_t condition_rank,
+                                              const ContiguousGroup& group) {
+  auto last_rank = group.size() - 1;
+  auto this_rank = group.thread_rank();
+  if (this_rank == last_rank) {
+    *e = &s_elements[(threadIdx.x - this_rank) + condition_rank];
+  } else if (this_rank == condition_rank) {
+    *e = &s_elements[(threadIdx.x - this_rank) + last_rank];
   }
-  return ballot;
 }
 
 template <typename DatasetT, size_t kBlockSize, size_t kRowsPerWarp>
@@ -428,11 +423,12 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
       atomicAdd(phis_interactions + phi_offset, phi);
     }
 
-    for (int64_t condition_feature = 0; condition_feature < X.NumCols() + 1;
-         condition_feature++) {
-      auto condition_feature_present = SwapConditionedElement(
-          &e, s_elements, condition_feature, labelled_group);
-      if (!condition_feature_present) continue;
+    for (auto condition_rank = 1ull; condition_rank < labelled_group.size();
+         condition_rank++) {
+      e = &s_elements[threadIdx.x];
+      int64_t condition_feature =
+          labelled_group.shfl(e->feature_idx, condition_rank);
+      SwapConditionedElement(&e, s_elements, condition_rank, labelled_group);
 
       float x = ComputePhiCondition(*e, row_idx, X, labelled_group,
                                     condition_feature);
