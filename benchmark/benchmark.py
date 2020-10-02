@@ -84,7 +84,7 @@ def check_accuracy(shap, margin):
         print("Warning: Failed 1e-1 accuracy")
 
 
-def get_models(args):
+def get_models(model):
     test_datasets = [
         TestDataset("covtype", datasets.fetch_covtype(return_X_y=True), "multi:softmax"),
         TestDataset("cal_housing", datasets.fetch_california_housing(return_X_y=True),
@@ -96,13 +96,13 @@ def get_models(args):
     models = []
     for d in test_datasets:
         small_name = d.name + "-small"
-        if small_name in args.model or args.model == "all" or args.model == "small":
+        if small_name in model or model == "all" or model == "small":
             models.append(Model(small_name, d, 10, 3))
         med_name = d.name + "-med"
-        if med_name in args.model or args.model == "all"or args.model == "med":
+        if med_name in model or model == "all" or model == "med":
             models.append(Model(med_name, d, 100, 8))
         large_name = d.name + "-large"
-        if large_name in args.model or args.model == "all"or args.model == "large":
+        if large_name in model or model == "all" or model == "large":
             models.append(Model(large_name, d, 1000, 16))
     return models
 
@@ -126,8 +126,8 @@ def run_benchmark(args):
     models = get_models(args)
     print_model_stats(models, args)
 
-    # predictors = ["cpu_predictor", "gpu_predictor"]
-    predictors = ["gpu_predictor"]
+    predictors = ["cpu_predictor", "gpu_predictor"]
+    # predictors = ["gpu_predictor"]
     test_rows = args.nrows
     df = pd.DataFrame(
         columns=["model", "test_rows", "cpu_time(s)", "cpu_std", "gpu_time(s)", "gpu_std",
@@ -163,23 +163,27 @@ def run_benchmark(args):
     df.to_csv(args.out, index=False)
 
 
-parser = argparse.ArgumentParser(description='GPUTreeShap benchmark')
-parser.add_argument("-model", default="all", type=str,
-                    help="The model to be used for benchmarking. 'all' for all datasets.")
+def main():
+    parser = argparse.ArgumentParser(description='GPUTreeShap benchmark')
+    parser.add_argument("-model", default="all", type=str,
+                        help="The model to be used for benchmarking. 'all' for all datasets.")
 
-parser.add_argument("-nrows", default=10000, type=int,
-                    help=(
-                        "Number of test rows."))
-parser.add_argument("-niter", default=5, type=int,
-                    help=(
-                        "Number of times to repeat the experiment."))
-parser.add_argument("-format", default="text", type=str,
-                    help="Format of output tables. E.g. text,latex,csv")
+    parser.add_argument("-nrows", default=10000, type=int,
+                        help=(
+                            "Number of test rows."))
+    parser.add_argument("-niter", default=5, type=int,
+                        help=(
+                            "Number of times to repeat the experiment."))
+    parser.add_argument("-format", default="text", type=str,
+                        help="Format of output tables. E.g. text,latex,csv")
 
-parser.add_argument("-out", default="results.csv", type=str)
-parser.add_argument("-interactions", default=False, type=bool)
-parser.add_argument("-out_models", default="models.csv", type=str)
+    parser.add_argument("-out", default="results.csv", type=str)
+    parser.add_argument("-interactions", default=False, type=bool)
+    parser.add_argument("-out_models", default="models.csv", type=str)
+
+    args = parser.parse_args()
+    run_benchmark(args)
 
 
-args = parser.parse_args()
-run_benchmark(args)
+if __name__ == '__main__':
+    main()

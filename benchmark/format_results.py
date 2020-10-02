@@ -28,7 +28,11 @@ args = parser.parse_args()
 results = pd.read_csv(args.in_results)
 models = pd.read_csv(args.in_models)
 del models["num_rounds"]
-models = models.rename(columns={"num_trees": "trees","num_leaves":"leaves"})
+del models["average_depth"]
+del results["test_rows"]
+models = models.rename(columns={"num_trees": "trees", "num_leaves": "leaves"})
+results = results.rename(
+    columns={"cpu_time(s)": "cpu(s)", "gpu_time(s)": "gpu(s)", "cpu_std": "std", "gpu_std": "std"})
 print("Formatted models:")
 print_format(models, args.format)
 print("Formatted results:")
