@@ -866,16 +866,18 @@ void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
   using path_vector = detail::RebindVector<PathElement, DeviceAllocatorT>;
 
   // Compute the global bias
+  double_vector temp_phi(phis_out_length, 0.0);
   path_vector device_paths(begin, end);
   double_vector bias(num_groups, 0.0);
   detail::ComputeBias<path_vector, double_vector, DeviceAllocatorT>(
       device_paths, &bias);
   auto d_bias = bias.data().get();
+  auto d_temp_phi = temp_phi.data().get();
   thrust::for_each_n(thrust::make_counting_iterator(0llu),
                      X.NumRows() * num_groups, [=] __device__(size_t idx) {
                        size_t group = idx % num_groups;
                        size_t row_idx = idx / num_groups;
-                       phis_out[IndexPhi(row_idx, num_groups, group,
+                       d_temp_phi[IndexPhi(row_idx, num_groups, group,
                                          X.NumCols(), X.NumCols())] +=
                            d_bias[group];
                      });
@@ -885,7 +887,6 @@ void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
   detail::PreprocessPaths<DeviceAllocatorT>(&device_paths, &deduplicated_paths,
                                             &device_bin_segments);
 
-  double_vector temp_phi(phis_out_length);
   detail::ComputeShap(X, device_bin_segments, deduplicated_paths, num_groups,
                       temp_phi.data().get());
   thrust::copy(temp_phi.begin(), temp_phi.end(),
@@ -947,18 +948,20 @@ void GPUTreeShapInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
   using path_vector = detail::RebindVector<PathElement, DeviceAllocatorT>;
 
   // Compute the global bias
+  double_vector temp_phi(phis_out_length, 0.0);
   path_vector device_paths(begin, end);
   double_vector bias(num_groups, 0.0);
   detail::ComputeBias<path_vector, double_vector, DeviceAllocatorT>(
       device_paths, &bias);
   auto d_bias = bias.data().get();
+  auto d_temp_phi = temp_phi.data().get();
   thrust::for_each_n(
       thrust::make_counting_iterator(0llu), X.NumRows() * num_groups,
       [=] __device__(size_t idx) {
         size_t group = idx % num_groups;
         size_t row_idx = idx / num_groups;
-        phis_out[IndexPhiInteractions(row_idx, num_groups, group, X.NumCols(),
-                                      X.NumCols(), X.NumCols())] +=
+        d_temp_phi[IndexPhiInteractions(row_idx, num_groups, group, X.NumCols(),
+                                        X.NumCols(), X.NumCols())] +=
             d_bias[group];
       });
 
@@ -967,7 +970,6 @@ void GPUTreeShapInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
   detail::PreprocessPaths<DeviceAllocatorT>(&device_paths, &deduplicated_paths,
                                             &device_bin_segments);
 
-  double_vector temp_phi(phis_out_length);
   detail::ComputeShapInteractions(X, device_bin_segments, deduplicated_paths,
                                   num_groups, temp_phi.data().get());
   thrust::copy(temp_phi.begin(), temp_phi.end(),
