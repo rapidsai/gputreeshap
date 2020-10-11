@@ -104,10 +104,11 @@ __device__ __forceinline__ double atomicAddDouble(double* address,
   return atomicAdd(address, val);
 }
 #else  // In device code and CUDA < 600
-__device__ __forceinline__ double atomicAddDouble(double* address, double val) {  // NOLINT
-  unsigned long long int* address_as_ull =
-    (unsigned long long int*)address;                   // NOLINT
-  unsigned long long int old = *address_as_ull, assumed;  // NOLINT
+__device__ __forceinline__ double atomicAddDouble(double* address,
+                                                  double val) {  // NOLINT
+  unsigned long long int* address_as_ull =                       // NOLINT
+      (unsigned long long int*)address;                          // NOLINT
+  unsigned long long int old = *address_as_ull, assumed;         // NOLINT
 
   do {
     assumed = old;
@@ -887,7 +888,8 @@ void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
   double_vector temp_phi(phis_out_length);
   detail::ComputeShap(X, device_bin_segments, deduplicated_paths, num_groups,
                       temp_phi.data().get());
-  thrust::copy(temp_phi.begin(), temp_phi.end(), thrust::device_pointer_cast(phis_out));
+  thrust::copy(temp_phi.begin(), temp_phi.end(),
+               thrust::device_pointer_cast(phis_out));
 }
 
 /*!
@@ -968,6 +970,7 @@ void GPUTreeShapInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
   double_vector temp_phi(phis_out_length);
   detail::ComputeShapInteractions(X, device_bin_segments, deduplicated_paths,
                                   num_groups, temp_phi.data().get());
-  thrust::copy(temp_phi.begin(), temp_phi.end(), thrust::device_pointer_cast(phis_out));
+  thrust::copy(temp_phi.begin(), temp_phi.end(),
+               thrust::device_pointer_cast(phis_out));
 }
 };  // namespace gpu_treeshap
