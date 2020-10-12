@@ -64,15 +64,16 @@ class TestDataset {
 };
 
 void GenerateModel(std::vector<PathElement>* model, int group, size_t max_depth,
-                   size_t num_features, size_t num_paths, std::mt19937* gen) {
-  std::uniform_real_distribution<float> float_dis;
+                   size_t num_features, size_t num_paths, std::mt19937* gen,
+                   float max_v) {
+  std::uniform_real_distribution<float> value_dis(-max_v, max_v);
   std::uniform_int_distribution<int64_t> feature_dis(0, num_features - 1);
   std::bernoulli_distribution bern_dis;
   const float inf = std::numeric_limits<float>::infinity();
   size_t base_path_idx = model->empty() ? 0 : model->back().path_idx + 1;
   float z = std::pow(0.5, 1.0 / max_depth);
   for (auto i = 0ull; i < num_paths; i++) {
-    float v = float_dis(*gen);
+    float v = value_dis(*gen);
     model->emplace_back(
         PathElement{base_path_idx + i, -1, group, -inf, inf, false, 1.0, v});
     for (auto j = 0ull; j < max_depth; j++) {
@@ -99,11 +100,13 @@ void GenerateModel(std::vector<PathElement>* model, int group, size_t max_depth,
 std::vector<PathElement> GenerateEnsembleModel(size_t num_groups,
                                                size_t max_depth,
                                                size_t num_features,
-                                               size_t num_paths, size_t seed) {
+                                               size_t num_paths, size_t seed,
+                                               float max_v = 1.0f) {
   std::mt19937 gen(seed);
   std::vector<PathElement> model;
   for (auto group = 0llu; group < num_groups; group++) {
-    GenerateModel(&model, group, max_depth, num_features, num_paths, &gen);
+    GenerateModel(&model, group, max_depth, num_features, num_paths, &gen,
+                  max_v);
   }
   return model;
 }
@@ -795,4 +798,58 @@ __global__ void TestContiguousGroup() {
 TEST(GPUTreeShap, ContiguousGroup) {
   TestContiguousGroup<<<1, 32>>>();
   EXPECT_EQ(cudaDeviceSynchronize(), 0);
+}
+
+TEST(GPUTreeShap, ShapDeterminism) {
+  size_t num_rows = 100;
+  size_t num_features = 100;
+  size_t num_groups = 1;
+  size_t max_depth = 10;
+  size_t num_paths = 1000;
+  size_t samples = 100;
+  auto model =
+      GenerateEnsembleModel(num_groups, max_depth, num_features, num_paths, 78);
+  TestDataset test_data(num_rows, num_features, 22, 1e15);
+
+  auto X = test_data.GetDeviceWrapper();
+
+  thrust::device_vector<float> reference_phis(X.NumRows() * (X.NumCols() + 1) *
+                                              num_groups);
+  GPUTreeShap(X, model.begin(), model.end(), num_groups,
+              reference_phis.data().get(), reference_phis.size());
+
+  for (auto i = 0ull; i < samples; i++) {
+    thrust::device_vector<float> phis(reference_phis.size());
+    GPUTreeShap(X, model.begin(), model.end(), num_groups,
+                phis.data().get(), phis.size());
+    ASSERT_TRUE(thrust::equal(reference_phis.begin(), reference_phis.end(),
+                              phis.begin()));
+  }
+}
+
+TEST(GPUTreeShap, ShapInteractionsDeterminism) {
+  size_t num_rows = 100;
+  size_t num_features = 10;
+  size_t num_groups = 1;
+  size_t max_depth = 3;
+  size_t num_paths = 1000;
+  size_t samples = 10;
+  auto model =
+    GenerateEnsembleModel(num_groups, max_depth, num_features, num_paths, 78);
+  TestDataset test_data(num_rows, num_features, 22, 1e15);
+
+  auto X = test_data.GetDeviceWrapper();
+
+  thrust::device_vector<float> reference_phis(X.NumRows() * (X.NumCols() + 1) *
+                                              (X.NumCols() + 1) * num_groups);
+  GPUTreeShapInteractions(X, model.begin(), model.end(), num_groups,
+    reference_phis.data().get(), reference_phis.size());
+
+  for (auto i = 0ull; i < samples; i++) {
+    thrust::device_vector<float> phis(reference_phis.size());
+    GPUTreeShapInteractions(X, model.begin(), model.end(), num_groups,
+      phis.data().get(), phis.size());
+    ASSERT_TRUE(thrust::equal(reference_phis.begin(), reference_phis.end(),
+      phis.begin()));
+  }
 }

@@ -27,6 +27,7 @@
 #include <vector>
 #include <set>
 
+
 namespace gpu_treeshap {
 /*! An element of a unique path through a decision tree. */
 struct PathElement {
@@ -97,6 +98,31 @@ bool IsDeviceAccessible(PtrT ptr) {
   }
   return attributes.type != cudaMemoryTypeUnregistered;
 }
+#if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ >= 600 || defined(__clang__)
+__device__ __forceinline__ double atomicAddDouble(double* address,
+                                                  double val) {
+  return atomicAdd(address, val);
+}
+#else  // In device code and CUDA < 600
+__device__ __forceinline__ double atomicAddDouble(double* address,
+                                                  double val) {  // NOLINT
+  unsigned long long int* address_as_ull =                       // NOLINT
+      (unsigned long long int*)address;                          // NOLINT
+  unsigned long long int old = *address_as_ull, assumed;         // NOLINT
+
+  do {
+    assumed = old;
+    old = atomicCAS(address_as_ull, assumed,
+      __double_as_longlong(val + __longlong_as_double(assumed)));
+
+    // Note: uses integer comparison to avoid hang in case of NaN (since NaN !=
+    // NaN)
+  } while (assumed != old);
+
+  return __longlong_as_double(old);
+}
+#endif
+
 
 __forceinline__ __device__ unsigned int lanemask32_lt() {
   unsigned int lanemask32_lt;
@@ -302,7 +328,7 @@ template <typename DatasetT, size_t kBlockSize, size_t kRowsPerWarp>
 __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
     ShapKernel(DatasetT X, size_t bins_per_row,
                const PathElement* path_elements, const size_t* bin_segments,
-               size_t num_groups, float* phis) {
+               size_t num_groups, double* phis) {
   // Use shared memory for structs, otherwise nvcc puts in local memory
   __shared__ DatasetT s_X;
   s_X = X;
@@ -323,9 +349,9 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
     float phi = ComputePhi(e, row_idx, X, labelled_group, zero_fraction);
 
     if (!e.IsRoot()) {
-      atomicAdd(&phis[IndexPhi(row_idx, num_groups, e.group, X.NumCols(),
-                               e.feature_idx)],
-                phi);
+      atomicAddDouble(&phis[IndexPhi(row_idx, num_groups, e.group, X.NumCols(),
+                                     e.feature_idx)],
+                      phi);
     }
   }
 }
@@ -335,7 +361,7 @@ void ComputeShap(
     DatasetT X,
     const thrust::device_vector<size_t, SizeTAllocatorT>& bin_segments,
     const thrust::device_vector<PathElement, PathAllocatorT>& path_elements,
-    size_t num_groups, float* phis) {
+    size_t num_groups, double* phis) {
   size_t bins_per_row = bin_segments.size() - 1;
   const int kBlockThreads = GPUTREESHAP_MAX_THREADS_PER_BLOCK;
   const int warps_per_block = kBlockThreads / 32;
@@ -398,7 +424,7 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
     ShapInteractionsKernel(DatasetT X, size_t bins_per_row,
                            const PathElement* path_elements,
                            const size_t* bin_segments, size_t num_groups,
-                           float* phis_interactions) {
+                           double* phis_interactions) {
   // Use shared memory for structs, otherwise nvcc puts in local memory
   __shared__ DatasetT s_X;
   s_X = X;
@@ -420,7 +446,7 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
       auto phi_offset =
           IndexPhiInteractions(row_idx, num_groups, e->group, X.NumCols(),
                                e->feature_idx, e->feature_idx);
-      atomicAdd(phis_interactions + phi_offset, phi);
+      atomicAddDouble(phis_interactions + phi_offset, phi);
     }
 
     for (auto condition_rank = 1ull; condition_rank < labelled_group.size();
@@ -436,12 +462,12 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
         auto phi_offset =
             IndexPhiInteractions(row_idx, num_groups, e->group, X.NumCols(),
                                  e->feature_idx, condition_feature);
-        atomicAdd(phis_interactions + phi_offset, x);
+        atomicAddDouble(phis_interactions + phi_offset, x);
         // Subtract effect from diagonal
         auto phi_diag =
             IndexPhiInteractions(row_idx, num_groups, e->group, X.NumCols(),
                                  e->feature_idx, e->feature_idx);
-        atomicAdd(phis_interactions + phi_diag, -x);
+        atomicAddDouble(phis_interactions + phi_diag, -x);
       }
     }
   }
@@ -452,7 +478,7 @@ void ComputeShapInteractions(
     DatasetT X,
     const thrust::device_vector<size_t, SizeTAllocatorT>& bin_segments,
     const thrust::device_vector<PathElement, PathAllocatorT>& path_elements,
-    size_t num_groups, float* phis) {
+    size_t num_groups, double* phis) {
   size_t bins_per_row = bin_segments.size() - 1;
   const int kBlockThreads = GPUTREESHAP_MAX_THREADS_PER_BLOCK;
   const int warps_per_block = kBlockThreads / 32;
@@ -680,7 +706,7 @@ void GetPathLengths(const PathVectorT& device_paths,
   auto d_lengths = path_lengths->data().get();
   thrust::for_each_n(counting, device_paths.size(), [=] __device__(size_t idx) {
     auto path_idx = d_paths[idx].path_idx;
-    atomicAdd(d_lengths + path_idx, 1);
+    atomicAdd(d_lengths + path_idx, 1ull);
   });
 
   DeviceAllocatorT alloc;
@@ -840,16 +866,18 @@ void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
   using path_vector = detail::RebindVector<PathElement, DeviceAllocatorT>;
 
   // Compute the global bias
+  double_vector temp_phi(phis_out_length, 0.0);
   path_vector device_paths(begin, end);
   double_vector bias(num_groups, 0.0);
   detail::ComputeBias<path_vector, double_vector, DeviceAllocatorT>(
       device_paths, &bias);
   auto d_bias = bias.data().get();
+  auto d_temp_phi = temp_phi.data().get();
   thrust::for_each_n(thrust::make_counting_iterator(0llu),
                      X.NumRows() * num_groups, [=] __device__(size_t idx) {
                        size_t group = idx % num_groups;
                        size_t row_idx = idx / num_groups;
-                       phis_out[IndexPhi(row_idx, num_groups, group,
+                       d_temp_phi[IndexPhi(row_idx, num_groups, group,
                                          X.NumCols(), X.NumCols())] +=
                            d_bias[group];
                      });
@@ -860,7 +888,9 @@ void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
                                             &device_bin_segments);
 
   detail::ComputeShap(X, device_bin_segments, deduplicated_paths, num_groups,
-                      phis_out);
+                      temp_phi.data().get());
+  thrust::copy(temp_phi.begin(), temp_phi.end(),
+               thrust::device_pointer_cast(phis_out));
 }
 
 /*!
@@ -918,18 +948,20 @@ void GPUTreeShapInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
   using path_vector = detail::RebindVector<PathElement, DeviceAllocatorT>;
 
   // Compute the global bias
+  double_vector temp_phi(phis_out_length, 0.0);
   path_vector device_paths(begin, end);
   double_vector bias(num_groups, 0.0);
   detail::ComputeBias<path_vector, double_vector, DeviceAllocatorT>(
       device_paths, &bias);
   auto d_bias = bias.data().get();
+  auto d_temp_phi = temp_phi.data().get();
   thrust::for_each_n(
       thrust::make_counting_iterator(0llu), X.NumRows() * num_groups,
       [=] __device__(size_t idx) {
         size_t group = idx % num_groups;
         size_t row_idx = idx / num_groups;
-        phis_out[IndexPhiInteractions(row_idx, num_groups, group, X.NumCols(),
-                                      X.NumCols(), X.NumCols())] +=
+        d_temp_phi[IndexPhiInteractions(row_idx, num_groups, group, X.NumCols(),
+                                        X.NumCols(), X.NumCols())] +=
             d_bias[group];
       });
 
@@ -939,6 +971,8 @@ void GPUTreeShapInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
                                             &device_bin_segments);
 
   detail::ComputeShapInteractions(X, device_bin_segments, deduplicated_paths,
-                                  num_groups, phis_out);
+                                  num_groups, temp_phi.data().get());
+  thrust::copy(temp_phi.begin(), temp_phi.end(),
+               thrust::device_pointer_cast(phis_out));
 }
 };  // namespace gpu_treeshap
