@@ -853,3 +853,35 @@ TEST(GPUTreeShap, ShapInteractionsDeterminism) {
       phis.begin()));
   }
 }
+
+TEST(GPUTreeShap, TaylorInteractions) {
+  const float inf = std::numeric_limits<float>::infinity();
+  float c = 3.0f;
+  std::vector<PathElement> path{
+      PathElement{0, -1, 0, -inf, inf, false, 1.0f, 1.0f},
+      {0, 0, 0, 0.5f, inf, false, 0.0f, 1.0f},
+      {1, -1, 0, -inf,inf, false, 1.0f, 1.0f},
+      {1, 1, 0, 0.5f, inf, false, 0.0f, 1.0f},
+      {2, -1, 0, -inf, inf, false, 1.0f, 1.0f},
+      {2, 2, 0, 0.5f, inf, false, 0.0f, 1.0f},
+      {3, -1, 0, -inf,inf, false, 1.0f, c},
+      {3, 0, 0, 0.5f, inf, false, 0.0f, c},
+      {3, 1, 0, 0.5f, inf, false, 0.0f, c},
+      {3, 2, 0, 0.5f, inf, false, 0.0f, c},
+  };
+  thrust::device_vector<float> data =
+      std::vector<float>({1.0f, 1.0f, 1.0f});
+  DenseDatasetWrapper X(data.data().get(), 1, 3);
+  thrust::device_vector<float> interaction_phis(X.NumRows() * (X.NumCols() + 1) *
+                                    (X.NumCols() + 1));
+  GPUTreeShapTaylorInteractions(X, path.begin(), path.end(), 1, interaction_phis.data().get(),
+                          interaction_phis.size());
+  std::vector<float> interactions_result(interaction_phis.begin(), interaction_phis.end()); 
+  thrust::device_vector<float> phis(X.NumRows() * 
+                                    (X.NumCols() + 1));
+  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(),
+                          phis.size());
+  std::vector<float> result(phis.begin(),phis.end());
+
+}
+
