@@ -284,9 +284,10 @@ class GroupPath {
 // Has different permutation weightings to the above
 // Used in Taylor Shapley interaction index
 class TaylorGroupPath:GroupPath {
-public:
+ public:
   __device__ TaylorGroupPath(const ContiguousGroup& g, float zero_fraction,
-    float one_fraction):GroupPath(g,zero_fraction,one_fraction){}
+                             float one_fraction)
+      : GroupPath(g, zero_fraction, one_fraction) {}
 
   // Extend the path is normal, all reweighting can happen in UnwoundPathSum
   __device__ void Extend() { GroupPath::Extend(); }
@@ -297,24 +298,27 @@ public:
   __device__ float UnwoundPathSum() {
     float one_fraction = zero_one_fraction_[1];
     float zero_fraction = zero_one_fraction_[0];
-    float next_one_portion =
-      g_.shfl(pweight_, unique_depth_) / float(unique_depth_ + 2);
+    float next_one_portion = g_.shfl(pweight_, unique_depth_) /
+                             static_cast<float>(unique_depth_ + 2);
 
     float total = 0.0f;
     for (int i = unique_depth_ - 1; i >= 0; i--) {
-      float ith_pweight = g_.shfl(pweight_, i) * (float(unique_depth_ - i + 1) /
-        float(unique_depth_ + 2));
+      float ith_pweight =
+          g_.shfl(pweight_, i) * (static_cast<float>(unique_depth_ - i + 1) /
+                                  static_cast<float>(unique_depth_ + 2));
       if (one_fraction > 0.0f) {
         const float tmp =
-          next_one_portion * (unique_depth_ + 2) / ((i + 1) * one_fraction);
+            next_one_portion * (unique_depth_ + 2) / ((i + 1) * one_fraction);
 
         total += tmp;
-        next_one_portion = ith_pweight - tmp * zero_fraction *
-          ((unique_depth_ - i + 1) /
-            float(unique_depth_ + 2));
+        next_one_portion =
+            ith_pweight - tmp * zero_fraction *
+                              ((unique_depth_ - i + 1) /
+                               static_cast<float>(unique_depth_ + 2));
       } else if (zero_fraction > 0.0f) {
-        total += (ith_pweight / zero_fraction) /
-          ((unique_depth_ - i + 1) / float(unique_depth_ + 2));
+        total +=
+            (ith_pweight / zero_fraction) /
+            ((unique_depth_ - i + 1) / static_cast<float>(unique_depth_ + 2));
       }
     }
 
@@ -366,8 +370,7 @@ void __device__ ConfigureThread(const DatasetT& X, const size_t bins_per_row,
   uint32_t thread_rank = threadIdx.x % warp_size;
   if (thread_rank >= path_end - path_start) {
     *thread_active = false;
-  }
-  else {
+  } else {
     *e = path_elements[path_start + thread_rank];
     *start_row = bank * kRowsPerWarp;
     *end_row = min((bank + 1) * kRowsPerWarp, X.NumRows());
@@ -474,7 +477,6 @@ inline __device__ void SwapConditionedElement(PathElement** e,
   } else if (this_rank == condition_rank) {
     *e = &s_elements[(threadIdx.x - this_rank) + last_rank];
   }
-
 }
 
 template <typename DatasetT, size_t kBlockSize, size_t kRowsPerWarp>
@@ -852,10 +854,9 @@ struct PathTooLongOp {
 
 struct IncorrectVOp {
   const PathElement* paths;
-  __device__ size_t operator()(size_t idx)
-  {
+  __device__ size_t operator()(size_t idx) {
     auto a = paths[idx - 1];
-    auto b = paths[idx ];
+    auto b = paths[idx];
     return a.path_idx == b.path_idx && a.v != b.v;
   }
 };
@@ -863,13 +864,12 @@ struct IncorrectVOp {
 template <typename DeviceAllocatorT, typename PathVectorT,
           typename LengthVectorT>
 void ValidatePaths(const PathVectorT& device_paths,
-                         const  LengthVectorT& path_lengths)
-{
-  
+                   const LengthVectorT& path_lengths) {
   DeviceAllocatorT alloc;
   PathTooLongOp too_long_op;
-  auto invalid_length = thrust::any_of(
-      thrust::cuda::par(alloc), path_lengths.begin(), path_lengths.end(), too_long_op);
+  auto invalid_length =
+      thrust::any_of(thrust::cuda::par(alloc), path_lengths.begin(),
+                     path_lengths.end(), too_long_op);
 
   if (invalid_length) {
     throw std::invalid_argument("Tree depth must be <= 32");
@@ -877,11 +877,13 @@ void ValidatePaths(const PathVectorT& device_paths,
 
   IncorrectVOp incorrect_v_op{device_paths.data().get()};
   auto counting = thrust::counting_iterator<size_t>(0);
-  auto incorrect_v = thrust::any_of(thrust::cuda::par(alloc), counting + 1,
+  auto incorrect_v =
+      thrust::any_of(thrust::cuda::par(alloc), counting + 1,
                      counting + device_paths.size(), incorrect_v_op);
 
   if (incorrect_v) {
-    throw std::invalid_argument("Leaf value v should be the same across a single path");
+    throw std::invalid_argument(
+        "Leaf value v should be the same across a single path");
   }
 }
 
@@ -1094,16 +1096,16 @@ void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
  */
 template <typename DeviceAllocatorT = thrust::device_allocator<int>,
           typename DatasetT, typename PathIteratorT>
-  void GPUTreeShapInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
-    size_t num_groups, float* phis_out,
-    size_t phis_out_length) {
+void GPUTreeShapInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
+                             size_t num_groups, float* phis_out,
+                             size_t phis_out_length) {
   if (X.NumRows() == 0 || X.NumCols() == 0 || end - begin <= 0) return;
   if (phis_out_length <
-    X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) * num_groups) {
+      X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) * num_groups) {
     throw std::invalid_argument(
-      "phis_out must be at least of size X.NumRows() * (X.NumCols() + 1)  * "
-      "(X.NumCols() + 1) * "
-      "num_groups");
+        "phis_out must be at least of size X.NumRows() * (X.NumCols() + 1)  * "
+        "(X.NumCols() + 1) * "
+        "num_groups");
   }
 
   if (!detail::IsDeviceAccessible(phis_out)) {
@@ -1119,28 +1121,28 @@ template <typename DeviceAllocatorT = thrust::device_allocator<int>,
   path_vector device_paths(begin, end);
   double_vector bias(num_groups, 0.0);
   detail::ComputeBias<path_vector, double_vector, DeviceAllocatorT>(
-    device_paths, &bias);
+      device_paths, &bias);
   auto d_bias = bias.data().get();
   auto d_temp_phi = temp_phi.data().get();
   thrust::for_each_n(
-    thrust::make_counting_iterator(0llu), X.NumRows() * num_groups,
-    [=] __device__(size_t idx) {
-    size_t group = idx % num_groups;
-    size_t row_idx = idx / num_groups;
-    d_temp_phi[IndexPhiInteractions(row_idx, num_groups, group, X.NumCols(),
-      X.NumCols(), X.NumCols())] +=
-      d_bias[group];
-  });
+      thrust::make_counting_iterator(0llu), X.NumRows() * num_groups,
+      [=] __device__(size_t idx) {
+        size_t group = idx % num_groups;
+        size_t row_idx = idx / num_groups;
+        d_temp_phi[IndexPhiInteractions(row_idx, num_groups, group, X.NumCols(),
+                                        X.NumCols(), X.NumCols())] +=
+            d_bias[group];
+      });
 
   path_vector deduplicated_paths;
   size_vector device_bin_segments;
   detail::PreprocessPaths<DeviceAllocatorT>(&device_paths, &deduplicated_paths,
-    &device_bin_segments);
+                                            &device_bin_segments);
 
   detail::ComputeShapInteractions(X, device_bin_segments, deduplicated_paths,
-    num_groups, temp_phi.data().get());
+                                  num_groups, temp_phi.data().get());
   thrust::copy(temp_phi.begin(), temp_phi.end(),
-    thrust::device_pointer_cast(phis_out));
+               thrust::device_pointer_cast(phis_out));
 }
 
 /*!
@@ -1177,9 +1179,9 @@ template <typename DeviceAllocatorT = thrust::device_allocator<int>,
  */
 template <typename DeviceAllocatorT = thrust::device_allocator<int>,
           typename DatasetT, typename PathIteratorT>
-void GPUTreeShapTaylorInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
-                             size_t num_groups, float* phis_out,
-                             size_t phis_out_length) {
+void GPUTreeShapTaylorInteractions(DatasetT X, PathIteratorT begin,
+                                   PathIteratorT end, size_t num_groups,
+                                   float* phis_out, size_t phis_out_length) {
   if (X.NumRows() == 0 || X.NumCols() == 0 || end - begin <= 0) return;
   if (phis_out_length <
       X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) * num_groups) {
@@ -1220,8 +1222,9 @@ void GPUTreeShapTaylorInteractions(DatasetT X, PathIteratorT begin, PathIterator
   detail::PreprocessPaths<DeviceAllocatorT>(&device_paths, &deduplicated_paths,
                                             &device_bin_segments);
 
-  detail::ComputeShapTaylorInteractions(X, device_bin_segments, deduplicated_paths,
-                                  num_groups, temp_phi.data().get());
+  detail::ComputeShapTaylorInteractions(X, device_bin_segments,
+                                        deduplicated_paths, num_groups,
+                                        temp_phi.data().get());
   thrust::copy(temp_phi.begin(), temp_phi.end(),
                thrust::device_pointer_cast(phis_out));
 }

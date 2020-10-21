@@ -20,8 +20,8 @@
 #include <limits>
 #include <random>
 #include <vector>
-#include "../GPUTreeShap/gpu_treeshap.h"
 #include <numeric>
+#include "../GPUTreeShap/gpu_treeshap.h"
 
 using namespace gpu_treeshap;  // NOLINT
 
@@ -297,7 +297,8 @@ INSTANTIATE_TEST_CASE_P(ShapInteractionsInstantiation, ShapInteractionsSumTest,
                                          testing::ValuesIn(test_num_paths)),
                         PrintTestName);
 
-INSTANTIATE_TEST_CASE_P(ShapTaylorInteractionsInstantiation, ShapTaylorInteractionsSumTest,
+INSTANTIATE_TEST_CASE_P(ShapTaylorInteractionsInstantiation,
+                        ShapTaylorInteractionsSumTest,
                         testing::Combine(testing::ValuesIn(test_num_rows),
                                          testing::ValuesIn(test_num_features),
                                          testing::ValuesIn(test_num_groups),
@@ -994,20 +995,19 @@ TEST(GPUTreeShap, TaylorInteractionsPaperExample) {
   std::vector<PathElement> path{
       PathElement{0, -1, 0, -inf, inf, false, 1.0f, 1.0f},
       {0, 0, 0, 0.5f, inf, false, 0.0f, 1.0f},
-      {1, -1, 0, -inf,inf, false, 1.0f, 1.0f},
+      {1, -1, 0, -inf, inf, false, 1.0f, 1.0f},
       {1, 1, 0, 0.5f, inf, false, 0.0f, 1.0f},
       {2, -1, 0, -inf, inf, false, 1.0f, 1.0f},
       {2, 2, 0, 0.5f, inf, false, 0.0f, 1.0f},
-      {3, -1, 0, -inf,inf, false, 1.0f, c},
+      {3, -1, 0, -inf, inf, false, 1.0f, c},
       {3, 0, 0, 0.5f, inf, false, 0.0f, c},
       {3, 1, 0, 0.5f, inf, false, 0.0f, c},
       {3, 2, 0, 0.5f, inf, false, 0.0f, c},
   };
-  thrust::device_vector<float> data =
-      std::vector<float>({1.0f, 1.0f, 1.0f});
+  thrust::device_vector<float> data = std::vector<float>({1.0f, 1.0f, 1.0f});
   DenseDatasetWrapper X(data.data().get(), 1, 3);
-  thrust::device_vector<float> interaction_phis(X.NumRows() * (X.NumCols() + 1) *
-                                    (X.NumCols() + 1));
+  thrust::device_vector<float> interaction_phis(
+      X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1));
   GPUTreeShapTaylorInteractions(X, path.begin(), path.end(), 1,
                                 interaction_phis.data().get(),
                                 interaction_phis.size());
@@ -1016,7 +1016,7 @@ TEST(GPUTreeShap, TaylorInteractionsPaperExample) {
                                          interaction_phis.end());
   std::vector<float> expected_result = {1.0, 0.5, 0.5, 0.0, 0.5, 1.0, 0.5, 0.0,
                                         0.5, 0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-  
+
   ASSERT_EQ(interaction_phis, expected_result);
 }
 
