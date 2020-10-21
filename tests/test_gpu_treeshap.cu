@@ -20,6 +20,7 @@
 #include <limits>
 #include <random>
 #include <vector>
+#include <numeric>
 #include "../GPUTreeShap/gpu_treeshap.h"
 
 using namespace gpu_treeshap;  // NOLINT
@@ -225,6 +226,45 @@ TEST_P(ShapInteractionsSumTest, ShapInteractionsSum) {
   }
 }
 
+class ShapTaylorInteractionsSumTest : public ::testing::TestWithParam<
+                        std::tuple<size_t, size_t, size_t, size_t, size_t>> {};
+TEST_P(ShapTaylorInteractionsSumTest, ShapTaylorInteractionsSum) {
+  size_t num_rows, num_features, num_groups, max_depth, num_paths;
+  std::tie(num_rows, num_features, num_groups, max_depth, num_paths) =
+    GetParam();
+  auto model =
+    GenerateEnsembleModel(num_groups, max_depth, num_features, num_paths, 78);
+  TestDataset test_data(num_rows, num_features, 22);
+
+  auto X = test_data.GetDeviceWrapper();
+
+  auto margin = Predict(model, test_data, num_groups);
+
+  thrust::device_vector<float> phis_interactions(
+    X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) * num_groups);
+  GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), num_groups,
+    phis_interactions.data().get(),
+    phis_interactions.size());
+  thrust::host_vector<float> interactions_result(phis_interactions);
+  std::vector<float> sum(margin.size());
+  for (auto row_idx = 0ull; row_idx < num_rows; row_idx++) {
+    for (auto group = 0ull; group < num_groups; group++) {
+      for (auto i = 0ull; i < num_features + 1; i++) {
+        for (auto j = 0ull; j < num_features + 1; j++) {
+          size_t result_index = IndexPhiInteractions(row_idx, num_groups, group,
+            num_features, i, j);
+          sum[row_idx * num_groups + group] +=
+            interactions_result[result_index];
+        }
+      }
+    }
+  }
+
+  for (auto i = 0ull; i < sum.size(); i++) {
+    ASSERT_NEAR(sum[i], margin[i], 1e-3);
+  }
+}
+
 std::string PrintTestName(
     const testing::TestParamInfo<ShapSumTest::ParamType>& info) {
   std::string name = "nrow" + std::to_string(std::get<0>(info.param)) + "_";
@@ -257,6 +297,15 @@ INSTANTIATE_TEST_CASE_P(ShapInteractionsInstantiation, ShapInteractionsSumTest,
                                          testing::ValuesIn(test_num_paths)),
                         PrintTestName);
 
+INSTANTIATE_TEST_CASE_P(ShapTaylorInteractionsInstantiation,
+                        ShapTaylorInteractionsSumTest,
+                        testing::Combine(testing::ValuesIn(test_num_rows),
+                                         testing::ValuesIn(test_num_features),
+                                         testing::ValuesIn(test_num_groups),
+                                         testing::ValuesIn(test_max_depth),
+                                         testing::ValuesIn(test_num_paths)),
+                        PrintTestName);
+
 TEST(GPUTreeShap, PathTooLong) {
   std::vector<PathElement> path(33);
   path[0] = PathElement(0, -1, 0, 0, 0, 0, 0, 0);
@@ -268,12 +317,66 @@ TEST(GPUTreeShap, PathTooLong) {
       std::vector<float>({1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f});
   DenseDatasetWrapper X(data.data().get(), 2, 3);
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
-  EXPECT_THROW(GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(),
-                           phis.size()),
-               std::invalid_argument);
-  EXPECT_THROW(GPUTreeShapInteractions(X, path.begin(), path.end(), 1,
-                                       phis.data().get(), phis.size()),
-               std::invalid_argument);
+  EXPECT_THROW(
+      {
+        try {
+          GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(),
+                      phis.size());
+        } catch (const std::invalid_argument& e) {
+          EXPECT_STREQ("Tree depth must be <= 32", e.what());
+          throw;
+        }
+      },
+      std::invalid_argument);
+
+  phis.resize((X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1)));
+  EXPECT_THROW(
+      {
+        try {
+          GPUTreeShapInteractions(X, path.begin(), path.end(), 1,
+                                  phis.data().get(), phis.size());
+        } catch (const std::invalid_argument& e) {
+          EXPECT_STREQ("Tree depth must be <= 32", e.what());
+          throw;
+        }
+      },
+      std::invalid_argument);
+}
+
+TEST(GPUTreeShap, PathVIncorrect) {
+  std::vector<PathElement> path = {
+      PathElement(0, -1, 0, 0.0f, 0.0f, false, 0.0, 1.0f),
+      {0, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.5f}};
+
+  thrust::device_vector<float> data = std::vector<float>({1.0f});
+  DenseDatasetWrapper X(data.data().get(), 1, 1);
+  thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
+  EXPECT_THROW(
+      {
+        try {
+          GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(),
+                      phis.size());
+        } catch (const std::invalid_argument& e) {
+          EXPECT_STREQ("Leaf value v should be the same across a single path",
+                       e.what());
+          throw;
+        }
+      },
+      std::invalid_argument);
+
+  phis.resize((X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1)));
+  EXPECT_THROW(
+      {
+        try {
+          GPUTreeShapInteractions(X, path.begin(), path.end(), 1,
+                                  phis.data().get(), phis.size());
+        } catch (const std::invalid_argument& e) {
+          EXPECT_STREQ("Leaf value v should be the same across a single path",
+                       e.what());
+          throw;
+        }
+      },
+      std::invalid_argument);
 }
 
 TEST(GPUTreeShap, PhisIncorrectLength) {
@@ -284,14 +387,36 @@ TEST(GPUTreeShap, PhisIncorrectLength) {
       std::vector<float>({1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f});
   DenseDatasetWrapper X(data.data().get(), 2, 3);
   thrust::device_vector<float> phis((X.NumRows() * (X.NumCols() + 1)) - 1);
-  EXPECT_THROW(GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(),
-                           phis.size()),
-               std::invalid_argument);
+  EXPECT_THROW(
+      {
+        try {
+          GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(),
+                      phis.size());
+        } catch (const std::invalid_argument& e) {
+          EXPECT_STREQ(
+              "phis_out must be at least of size X.NumRows() * (X.NumCols() + "
+              "1) * num_groups",
+              e.what());
+          throw;
+        }
+      },
+      std::invalid_argument);
 
   phis.resize((X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1)) - 1);
-  EXPECT_THROW(GPUTreeShapInteractions(X, path.begin(), path.end(), 1,
-                                       phis.data().get(), phis.size()),
-               std::invalid_argument);
+  EXPECT_THROW(
+      {
+        try {
+          GPUTreeShapInteractions(X, path.begin(), path.end(), 1,
+                                  phis.data().get(), phis.size());
+        } catch (const std::invalid_argument& e) {
+          EXPECT_STREQ(
+              "phis_out must be at least of size X.NumRows() * (X.NumCols() + "
+              "1)  * (X.NumCols() + 1) * num_groups",
+              e.what());
+          throw;
+        }
+      },
+      std::invalid_argument);
 }
 
 TEST(GPUTreeShap, PhisIncorrectMemory) {
@@ -302,7 +427,14 @@ TEST(GPUTreeShap, PhisIncorrectMemory) {
   DenseDatasetWrapper X(data.data().get(), 2, 3);
   std::vector<float> phis(X.NumRows() * (X.NumCols() + 1));
   EXPECT_THROW(
-      GPUTreeShap(X, path.begin(), path.end(), 1, phis.data(), phis.size()),
+      {
+        try {
+          GPUTreeShap(X, path.begin(), path.end(), 1, phis.data(), phis.size());
+        } catch (const std::invalid_argument& e) {
+          EXPECT_STREQ("phis_out must be device accessible", e.what());
+          throw;
+        }
+      },
       std::invalid_argument);
 }
 
@@ -852,4 +984,63 @@ TEST(GPUTreeShap, ShapInteractionsDeterminism) {
     ASSERT_TRUE(thrust::equal(reference_phis.begin(), reference_phis.end(),
       phis.begin()));
   }
+}
+
+// Example from page 10 section 4.1
+// Dhamdhere, Kedar, Ashish Agarwal, and Mukund Sundararajan. "The Shapley
+// Taylor Interaction Index." arXiv preprint arXiv:1902.05622 (2019).
+TEST(GPUTreeShap, TaylorInteractionsPaperExample) {
+  const float inf = std::numeric_limits<float>::infinity();
+  float c = 3.0f;
+  std::vector<PathElement> path{
+      PathElement{0, -1, 0, -inf, inf, false, 1.0f, 1.0f},
+      {0, 0, 0, 0.5f, inf, false, 0.0f, 1.0f},
+      {1, -1, 0, -inf, inf, false, 1.0f, 1.0f},
+      {1, 1, 0, 0.5f, inf, false, 0.0f, 1.0f},
+      {2, -1, 0, -inf, inf, false, 1.0f, 1.0f},
+      {2, 2, 0, 0.5f, inf, false, 0.0f, 1.0f},
+      {3, -1, 0, -inf, inf, false, 1.0f, c},
+      {3, 0, 0, 0.5f, inf, false, 0.0f, c},
+      {3, 1, 0, 0.5f, inf, false, 0.0f, c},
+      {3, 2, 0, 0.5f, inf, false, 0.0f, c},
+  };
+  thrust::device_vector<float> data = std::vector<float>({1.0f, 1.0f, 1.0f});
+  DenseDatasetWrapper X(data.data().get(), 1, 3);
+  thrust::device_vector<float> interaction_phis(
+      X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1));
+  GPUTreeShapTaylorInteractions(X, path.begin(), path.end(), 1,
+                                interaction_phis.data().get(),
+                                interaction_phis.size());
+
+  std::vector<float> interactions_result(interaction_phis.begin(),
+                                         interaction_phis.end());
+  std::vector<float> expected_result = {1.0, 0.5, 0.5, 0.0, 0.5, 1.0, 0.5, 0.0,
+                                        0.5, 0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+
+  ASSERT_EQ(interaction_phis, expected_result);
+}
+
+TEST(GPUTreeShap, TaylorInteractionsBasic) {
+  const float inf = std::numeric_limits<float>::infinity();
+  std::vector<PathElement> path{
+      PathElement{0, -1, 0, -inf, inf, false, 1.0f, 2.0f},
+      {0, 0, 0, 0.5f, inf, false, 0.25f, 2.0f},
+      {0, 1, 0, 0.5f, inf, false, 0.5f, 2.0f},
+      {0, 2, 0, 0.5f, inf, false, 0.6f, 2.0f},
+      {0, 3, 0, 0.5f, inf, false, 1.0f, 2.0f},
+  };
+  thrust::device_vector<float> data =
+      std::vector<float>({1.0f, 1.0f, 1.0f, 1.0f});
+  DenseDatasetWrapper X(data.data().get(), 1, 4);
+  thrust::device_vector<float> interaction_phis(
+      X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1));
+  GPUTreeShapTaylorInteractions(X, path.begin(), path.end(), 1,
+                                interaction_phis.data().get(),
+                                interaction_phis.size());
+
+  thrust::host_vector<float> interactions_result(interaction_phis);
+  float sum =
+      std::accumulate(interaction_phis.begin(), interaction_phis.end(), 0.0f);
+
+  ASSERT_FLOAT_EQ(sum, 2.0f);
 }

@@ -152,6 +152,16 @@ class ContiguousGroup {
     return __ballot_sync(mask_, predicate) >> (__ffs(mask_) - 1);
   }
 
+  template <typename T, typename OpT>
+  __device__ T reduce(T val, OpT op) {
+    for (int i = 1; i < this->size(); i *= 2) {
+      T shfl = shfl_up(val, i);
+      if (static_cast<int>(thread_rank()) - i >= 0) {
+        val = op(val, shfl);
+      }
+    }
+    return shfl(val, size() - 1);
+  }
   uint32_t mask_;
 };
 
@@ -247,7 +257,6 @@ class GroupPath {
   }
 
   // Each thread unwinds the path for its feature and returns the sum
-  // rank 0 returns a bias term - the product of all pz
   __device__ float UnwoundPathSum() {
     float next_one_portion = g_.shfl(pweight_, unique_depth_);
     float total = 0.0f;
@@ -263,10 +272,57 @@ class GroupPath {
       next_one_portion = __fmaf_rn(-tmp, precomputed, ith_pweight);
       float numerator =
           __fmul_rn(__fsub_rn(1.0f, zero_one_fraction_[1]), ith_pweight);
-      total += __fdividef(numerator, precomputed);
+      if (precomputed > 0.0f) {
+        total += __fdividef(numerator, precomputed);
+      }
     }
 
     return total;
+  }
+};
+
+// Has different permutation weightings to the above
+// Used in Taylor Shapley interaction index
+class TaylorGroupPath:GroupPath {
+ public:
+  __device__ TaylorGroupPath(const ContiguousGroup& g, float zero_fraction,
+                             float one_fraction)
+      : GroupPath(g, zero_fraction, one_fraction) {}
+
+  // Extend the path is normal, all reweighting can happen in UnwoundPathSum
+  __device__ void Extend() { GroupPath::Extend(); }
+
+  // Each thread unwinds the path for its feature and returns the sum
+  // We use a different permutation weighting for Taylor interactions
+  // As if the total number of features was one larger
+  __device__ float UnwoundPathSum() {
+    float one_fraction = zero_one_fraction_[1];
+    float zero_fraction = zero_one_fraction_[0];
+    float next_one_portion = g_.shfl(pweight_, unique_depth_) /
+                             static_cast<float>(unique_depth_ + 2);
+
+    float total = 0.0f;
+    for (int i = unique_depth_ - 1; i >= 0; i--) {
+      float ith_pweight =
+          g_.shfl(pweight_, i) * (static_cast<float>(unique_depth_ - i + 1) /
+                                  static_cast<float>(unique_depth_ + 2));
+      if (one_fraction > 0.0f) {
+        const float tmp =
+            next_one_portion * (unique_depth_ + 2) / ((i + 1) * one_fraction);
+
+        total += tmp;
+        next_one_portion =
+            ith_pweight - tmp * zero_fraction *
+                              ((unique_depth_ - i + 1) /
+                               static_cast<float>(unique_depth_ + 2));
+      } else if (zero_fraction > 0.0f) {
+        total +=
+            (ith_pweight / zero_fraction) /
+            ((unique_depth_ - i + 1) / static_cast<float>(unique_depth_ + 2));
+      }
+    }
+
+    return 2 * total;
   }
 };
 
@@ -314,12 +370,12 @@ void __device__ ConfigureThread(const DatasetT& X, const size_t bins_per_row,
   uint32_t thread_rank = threadIdx.x % warp_size;
   if (thread_rank >= path_end - path_start) {
     *thread_active = false;
-    return;
+  } else {
+    *e = path_elements[path_start + thread_rank];
+    *start_row = bank * kRowsPerWarp;
+    *end_row = min((bank + 1) * kRowsPerWarp, X.NumRows());
+    *thread_active = true;
   }
-  *e = path_elements[path_start + thread_rank];
-  *start_row = bank * kRowsPerWarp;
-  *end_row = min((bank + 1) * kRowsPerWarp, X.NumRows());
-  *thread_active = true;
 }
 
 #define GPUTREESHAP_MAX_THREADS_PER_BLOCK 256
@@ -376,26 +432,30 @@ void ComputeShap(
           bin_segments.data().get(), num_groups, phis);
 }
 
-template <typename DatasetT>
+template <typename PathT, typename DatasetT>
 __device__ float  ComputePhiCondition(const PathElement& e, size_t row_idx,
   const DatasetT& X, const ContiguousGroup& group,
                                     int64_t condition_feature) {
   float one_fraction = GetOneFraction(e, X, row_idx);
-  GroupPath path(group, e.zero_fraction, one_fraction);
+  PathT path(group, e.zero_fraction, one_fraction);
   size_t unique_path_length = group.size();
   float condition_on_fraction = 1.0f;
   float condition_off_fraction = 1.0f;
 
   // Extend the path
   for (auto i = 1ull; i < unique_path_length; i++) {
-    if (group.shfl(e.feature_idx, i) == condition_feature) {
-        condition_on_fraction = group.shfl(one_fraction, i);
-        condition_off_fraction = group.shfl(e.zero_fraction, i);
+    bool is_condition_feature =
+        group.shfl(e.feature_idx, i) == condition_feature;
+    float o_i = group.shfl(one_fraction, i);
+    float z_i = group.shfl(e.zero_fraction, i);
+
+    if (is_condition_feature) {
+      condition_on_fraction = o_i;
+      condition_off_fraction = z_i;
     } else {
       path.Extend();
     }
   }
-
   float sum = path.UnwoundPathSum();
   if (e.feature_idx == condition_feature) {
     return 0.0f;
@@ -455,8 +515,7 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
       int64_t condition_feature =
           labelled_group.shfl(e->feature_idx, condition_rank);
       SwapConditionedElement(&e, s_elements, condition_rank, labelled_group);
-
-      float x = ComputePhiCondition(*e, row_idx, X, labelled_group,
+      float x = ComputePhiCondition<GroupPath>(*e, row_idx, X, labelled_group,
                                     condition_feature);
       if (!e->IsRoot()) {
         auto phi_offset =
@@ -488,6 +547,89 @@ void ComputeShapInteractions(
   const uint32_t grid_size = DivRoundUp(warps_needed, warps_per_block);
 
   ShapInteractionsKernel<DatasetT, kBlockThreads, kRowsPerWarp>
+      <<<grid_size, kBlockThreads>>>(
+          X, bins_per_row, path_elements.data().get(),
+          bin_segments.data().get(), num_groups, phis);
+}
+
+template <typename DatasetT, size_t kBlockSize, size_t kRowsPerWarp>
+__global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
+    ShapTaylorInteractionsKernel(DatasetT X, size_t bins_per_row,
+                           const PathElement* path_elements,
+                           const size_t* bin_segments, size_t num_groups,
+                           double* phis_interactions) {
+  // Use shared memory for structs, otherwise nvcc puts in local memory
+  __shared__ DatasetT s_X;
+  if (threadIdx.x == 0) {
+    s_X = X;
+  }
+  __syncthreads();
+  __shared__ PathElement s_elements[kBlockSize];
+  PathElement* e = &s_elements[threadIdx.x];
+
+  size_t start_row, end_row;
+  bool thread_active;
+  ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(
+      s_X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, e,
+      &thread_active);
+  if (!thread_active) return;
+
+  auto labelled_group = active_labeled_partition(e->path_idx);
+
+  for (int64_t row_idx = start_row; row_idx < end_row; row_idx++) {
+    for (auto condition_rank = 1ull; condition_rank < labelled_group.size();
+         condition_rank++) {
+      e = &s_elements[threadIdx.x];
+      // Compute the diagonal terms
+      // TODO(Rory): this can be more efficient
+      float reduce_input =
+          e->IsRoot() || labelled_group.thread_rank() == condition_rank
+              ? 1.0f
+              : e->zero_fraction;
+      float reduce =
+          labelled_group.reduce(reduce_input, thrust::multiplies<float>());
+      if (labelled_group.thread_rank() == condition_rank) {
+        auto phi_offset =
+            IndexPhiInteractions(row_idx, num_groups, e->group, X.NumCols(),
+                                 e->feature_idx, e->feature_idx);
+        atomicAddDouble(
+            phis_interactions + phi_offset,
+            reduce * (GetOneFraction(*e, X, row_idx) - e->zero_fraction) *
+                e->v);
+      }
+
+      int64_t condition_feature =
+          labelled_group.shfl(e->feature_idx, condition_rank);
+
+      SwapConditionedElement(&e, s_elements, condition_rank, labelled_group);
+
+      float x = ComputePhiCondition<TaylorGroupPath>(
+          *e, row_idx, X, labelled_group, condition_feature);
+      if (!e->IsRoot()) {
+        auto phi_offset =
+            IndexPhiInteractions(row_idx, num_groups, e->group, X.NumCols(),
+                                 e->feature_idx, condition_feature);
+        atomicAddDouble(phis_interactions + phi_offset, x);
+      }
+    }
+  }
+}
+
+template <typename DatasetT, typename SizeTAllocatorT, typename PathAllocatorT>
+void ComputeShapTaylorInteractions(
+    DatasetT X,
+    const thrust::device_vector<size_t, SizeTAllocatorT>& bin_segments,
+    const thrust::device_vector<PathElement, PathAllocatorT>& path_elements,
+    size_t num_groups, double* phis) {
+  size_t bins_per_row = bin_segments.size() - 1;
+  const int kBlockThreads = GPUTREESHAP_MAX_THREADS_PER_BLOCK;
+  const int warps_per_block = kBlockThreads / 32;
+  const int kRowsPerWarp = 100;
+  size_t warps_needed = bins_per_row * DivRoundUp(X.NumRows(), kRowsPerWarp);
+
+  const uint32_t grid_size = DivRoundUp(warps_needed, warps_per_block);
+
+  ShapTaylorInteractionsKernel<DatasetT, kBlockThreads, kRowsPerWarp>
       <<<grid_size, kBlockThreads>>>(
           X, bins_per_row, path_elements.data().get(),
           bin_segments.data().get(), num_groups, phis);
@@ -691,10 +833,6 @@ std::vector<size_t> NFBinPacking(
   return bin_map;
 }
 
-struct PathTooLongOp {
-  __device__ size_t operator()(size_t length) { return length > 32; }
-};
-
 template <typename DeviceAllocatorT, typename PathVectorT,
           typename LengthVectorT>
 void GetPathLengths(const PathVectorT& device_paths,
@@ -708,14 +846,44 @@ void GetPathLengths(const PathVectorT& device_paths,
     auto path_idx = d_paths[idx].path_idx;
     atomicAdd(d_lengths + path_idx, 1ull);
   });
+}
 
+struct PathTooLongOp {
+  __device__ size_t operator()(size_t length) { return length > 32; }
+};
+
+struct IncorrectVOp {
+  const PathElement* paths;
+  __device__ size_t operator()(size_t idx) {
+    auto a = paths[idx - 1];
+    auto b = paths[idx];
+    return a.path_idx == b.path_idx && a.v != b.v;
+  }
+};
+
+template <typename DeviceAllocatorT, typename PathVectorT,
+          typename LengthVectorT>
+void ValidatePaths(const PathVectorT& device_paths,
+                   const LengthVectorT& path_lengths) {
   DeviceAllocatorT alloc;
-  PathTooLongOp op;
-  auto invalid_length = thrust::any_of(
-      thrust::cuda::par(alloc), path_lengths->begin(), path_lengths->end(), op);
+  PathTooLongOp too_long_op;
+  auto invalid_length =
+      thrust::any_of(thrust::cuda::par(alloc), path_lengths.begin(),
+                     path_lengths.end(), too_long_op);
 
   if (invalid_length) {
     throw std::invalid_argument("Tree depth must be <= 32");
+  }
+
+  IncorrectVOp incorrect_v_op{device_paths.data().get()};
+  auto counting = thrust::counting_iterator<size_t>(0);
+  auto incorrect_v =
+      thrust::any_of(thrust::cuda::par(alloc), counting + 1,
+                     counting + device_paths.size(), incorrect_v_op);
+
+  if (incorrect_v) {
+    throw std::invalid_argument(
+        "Leaf value v should be the same across a single path");
   }
 }
 
@@ -729,6 +897,7 @@ void PreprocessPaths(PathVectorT* device_paths, PathVectorT* deduplicated_paths,
   int_vector path_lengths;
   detail::GetPathLengths<DeviceAllocatorT>(*deduplicated_paths, &path_lengths);
   SizeVectorT device_bin_map = detail::BFDBinPacking(path_lengths);
+  ValidatePaths<DeviceAllocatorT>(*deduplicated_paths, path_lengths);
   detail::SortPaths<PathVectorT, SizeVectorT, DeviceAllocatorT>(
       deduplicated_paths, device_bin_map);
   detail::GetBinSegments<PathVectorT, SizeVectorT, DeviceAllocatorT>(
@@ -939,7 +1108,7 @@ void GPUTreeShapInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
         "num_groups");
   }
 
-  if (!detail ::IsDeviceAccessible(phis_out)) {
+  if (!detail::IsDeviceAccessible(phis_out)) {
     throw std::invalid_argument("phis_out must be device accessible");
   }
 
@@ -972,6 +1141,90 @@ void GPUTreeShapInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
 
   detail::ComputeShapInteractions(X, device_bin_segments, deduplicated_paths,
                                   num_groups, temp_phi.data().get());
+  thrust::copy(temp_phi.begin(), temp_phi.end(),
+               thrust::device_pointer_cast(phis_out));
+}
+
+/*!
+ * Compute feature interaction contributions using the Shapley Taylor index on the GPU, given a set of unique paths through a tree
+ * ensemble and a dataset. Uses device memory proportional to the tree ensemble size.
+ *
+ * \tparam  DatasetT  User-specified dataset container.
+ *
+ * \param           X               Thin wrapper over a dataset allocated in device memory. X
+ *                                  should be trivially copyable as a kernel parameter (i.e.
+ *                                  contain only pointers to actual data) and must implement the
+ *                                  methods NumRows()/NumCols()/GetElement(size_t row_idx, size_t
+ *                                  col_idx) as __device__ functions. GetElement may return NaN
+ *                                  where the feature value is missing.
+ * \param           begin           Iterator to paths, where separate paths are delineated by
+ *                                  PathElement.path_idx. Each unique path should contain 1 root
+ *                                  with feature_idx = -1 and zero_fraction = 1.0. The ordering of
+ *                                  path elements inside a unique path does not matter - the result
+ *                                  will be the same. Paths may contain duplicate features. See the
+ *                                  PathElement class for more information.
+ * \param           end             Path end iterator.
+ * \param           num_groups      Number of output groups. In multiclass classification the
+ *                                  algorithm outputs feature contributions per output class.
+ * \param [in,out]  phis_out        Device memory buffer for returning the feature interaction
+ *                                  contributions.  The last feature column contains the bias term.
+ *                                  Results are added to the input buffer without zeroing memory -
+ *                                  do not pass uninitialised memory.
+ * \param           phis_out_length Length of the phis_out for bounds checking. Must be at least
+ *                                  size X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) *
+ *                                  num_groups. *.
+ *
+ * \tparam  PathIteratorT Thrust type iterator, may be thrust::device_ptr for device memory, or stl
+ *                        iterator/raw pointer for host memory.
+ */
+template <typename DeviceAllocatorT = thrust::device_allocator<int>,
+          typename DatasetT, typename PathIteratorT>
+void GPUTreeShapTaylorInteractions(DatasetT X, PathIteratorT begin,
+                                   PathIteratorT end, size_t num_groups,
+                                   float* phis_out, size_t phis_out_length) {
+  if (X.NumRows() == 0 || X.NumCols() == 0 || end - begin <= 0) return;
+  if (phis_out_length <
+      X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) * num_groups) {
+    throw std::invalid_argument(
+        "phis_out must be at least of size X.NumRows() * (X.NumCols() + 1)  * "
+        "(X.NumCols() + 1) * "
+        "num_groups");
+  }
+
+  if (!detail ::IsDeviceAccessible(phis_out)) {
+    throw std::invalid_argument("phis_out must be device accessible");
+  }
+
+  using size_vector = detail::RebindVector<size_t, DeviceAllocatorT>;
+  using double_vector = detail::RebindVector<double, DeviceAllocatorT>;
+  using path_vector = detail::RebindVector<PathElement, DeviceAllocatorT>;
+
+  // Compute the global bias
+  double_vector temp_phi(phis_out_length, 0.0);
+  path_vector device_paths(begin, end);
+  double_vector bias(num_groups, 0.0);
+  detail::ComputeBias<path_vector, double_vector, DeviceAllocatorT>(
+      device_paths, &bias);
+  auto d_bias = bias.data().get();
+  auto d_temp_phi = temp_phi.data().get();
+  thrust::for_each_n(
+      thrust::make_counting_iterator(0llu), X.NumRows() * num_groups,
+      [=] __device__(size_t idx) {
+        size_t group = idx % num_groups;
+        size_t row_idx = idx / num_groups;
+        d_temp_phi[IndexPhiInteractions(row_idx, num_groups, group, X.NumCols(),
+                                        X.NumCols(), X.NumCols())] +=
+            d_bias[group];
+      });
+
+  path_vector deduplicated_paths;
+  size_vector device_bin_segments;
+  detail::PreprocessPaths<DeviceAllocatorT>(&device_paths, &deduplicated_paths,
+                                            &device_bin_segments);
+
+  detail::ComputeShapTaylorInteractions(X, device_bin_segments,
+                                        deduplicated_paths, num_groups,
+                                        temp_phi.data().get());
   thrust::copy(temp_phi.begin(), temp_phi.end(),
                thrust::device_pointer_cast(phis_out));
 }
