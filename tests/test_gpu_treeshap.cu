@@ -486,7 +486,9 @@ __global__ void TestExtendKernel(DatasetT X, size_t num_path_elements,
   auto group =
       cooperative_groups::tiled_partition<32, cooperative_groups::thread_block>(
           block);
-  if (group.thread_rank() >= num_path_elements) return;
+  bool thread_active = threadIdx.x < num_path_elements;
+  uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
+  if (!thread_active) return;
 
   // Test first training instance
   cooperative_groups::coalesced_group active_group =
@@ -494,7 +496,7 @@ __global__ void TestExtendKernel(DatasetT X, size_t num_path_elements,
   PathElement e = path_elements[active_group.thread_rank()];
   float one_fraction = detail::GetOneFraction(e, X, 0);
   float zero_fraction = e.zero_fraction;
-  auto labelled_group = detail::active_labeled_partition(0);
+  auto labelled_group = detail::active_labeled_partition(mask, 0);
   TestGroupPath path(labelled_group, zero_fraction, one_fraction);
   path.Extend();
   assert(path.unique_depth_ == 1);
@@ -618,11 +620,13 @@ __global__ void TestExtendMultipleKernel(DatasetT X, size_t n_first,
   auto warp =
       cooperative_groups::tiled_partition<32, cooperative_groups::thread_block>(
           block);
-  if (warp.thread_rank() >= n_first + n_second) return;
+  bool thread_active = threadIdx.x < n_first + n_second;
+  uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
+  if (!thread_active) return;
   cooperative_groups::coalesced_group active_group =
       cooperative_groups::coalesced_threads();
   int label = warp.thread_rank() >= n_first;
-  auto labeled_group = detail::active_labeled_partition(label);
+  auto labeled_group = detail::active_labeled_partition(mask, label);
   PathElement e = path_elements[warp.thread_rank()];
 
   // Test first training instance
@@ -726,7 +730,7 @@ __global__ void TestActiveLabeledPartition() {
       cooperative_groups::tiled_partition<32, cooperative_groups::thread_block>(
           block);
   int label = warp.thread_rank() < 5 ? 3 : 6;
-  auto labelled_partition = detail::active_labeled_partition(label);
+  auto labelled_partition = detail::active_labeled_partition(FULL_MASK, label);
 
   if (label == 3) {
     assert(labelled_partition.size() == 5);
@@ -736,8 +740,11 @@ __global__ void TestActiveLabeledPartition() {
     assert(labelled_partition.thread_rank() == warp.thread_rank() - 5);
   }
 
-  if (warp.thread_rank() % 2 == 1) {
-    auto labelled_partition2 = detail::active_labeled_partition(label);
+  bool odd=warp.thread_rank() % 2 == 1;
+  uint32_t odd_mask=__ballot_sync(FULL_MASK, odd);
+  uint32_t even_mask=__ballot_sync(FULL_MASK, !odd);
+  if (odd) {
+    auto labelled_partition2 = detail::active_labeled_partition(odd_mask,label);
     if (label == 3) {
       assert(labelled_partition2.size() == 2);
       assert(labelled_partition2.thread_rank() == warp.thread_rank() / 2);
@@ -746,7 +753,7 @@ __global__ void TestActiveLabeledPartition() {
       assert(labelled_partition2.thread_rank() == (warp.thread_rank() / 2) - 2);
     }
   } else {
-    auto labelled_partition2 = detail::active_labeled_partition(label);
+    auto labelled_partition2 = detail::active_labeled_partition(even_mask,label);
     if (label == 3) {
       assert(labelled_partition2.size() == 3);
       assert(labelled_partition2.thread_rank() == warp.thread_rank() / 2);
@@ -832,7 +839,7 @@ TEST(GPUTreeShap, FFDBinPacking) {
 __global__ void TestContiguousGroup() {
   int label = threadIdx.x > 2 && threadIdx.x < 6 ? 1 : threadIdx.x >= 6 ? 2 : 0;
 
-  auto group = detail::active_labeled_partition(label);
+  auto group = detail::active_labeled_partition(FULL_MASK, label);
 
   if (label == 1) {
     assert(group.size() == 3);
