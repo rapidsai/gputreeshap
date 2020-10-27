@@ -16,11 +16,11 @@
 
 #include <GPUTreeShap/gpu_treeshap.h>
 #include <cooperative_groups.h>
-#include "gtest/gtest.h"
 #include <limits>
 #include <random>
 #include <vector>
 #include <numeric>
+#include "gtest/gtest.h"
 #include "../GPUTreeShap/gpu_treeshap.h"
 
 using namespace gpu_treeshap;  // NOLINT
@@ -275,14 +275,12 @@ INSTANTIATE_TEST_CASE_P(ShapInstantiation, ParameterisedModelTest,
                                          testing::ValuesIn(test_num_paths)),
                         PrintTestName);
 
-#define EXPECT_THROW_CONTAINS_MESSAGE(stmt, etype, whatstring) EXPECT_THROW( \
-        try { \
-            stmt; \
-        } catch (const etype& ex) { \
-            EXPECT_NE(std::string(ex.what()).find(whatstring), std::string::npos); \
-            throw; \
-        } \
-    , etype)
+#define EXPECT_THROW_CONTAINS_MESSAGE(stmt, etype, whatstring)             \
+  EXPECT_THROW(try { stmt; } catch (const etype& ex) {                     \
+    EXPECT_NE(std::string(ex.what()).find(whatstring), std::string::npos); \
+    throw;                                                                 \
+  },                                                                       \
+               etype)
 
 class APITest : public ::testing::Test {
  protected:
@@ -330,11 +328,11 @@ TEST_F(APITest, PathTooLong) {
 }
 
 TEST_F(APITest, PathVIncorrect) {
-   model = {
-      PathElement(0, -1, 0, 0.0f, 0.0f, false, 0.0, 1.0f),
-      {0, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.5f}};
+  model = {PathElement(0, -1, 0, 0.0f, 0.0f, false, 0.0, 1.0f),
+           {0, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.5f}};
 
-  ExpectAPIThrow<std::invalid_argument>("Leaf value v should be the same across a single path");
+  ExpectAPIThrow<std::invalid_argument>(
+      "Leaf value v should be the same across a single path");
 }
 
 TEST_F(APITest, PhisIncorrectLength) {
