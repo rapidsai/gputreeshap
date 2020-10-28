@@ -5,6 +5,12 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CUDA_STANDARD 14)
 option(BUILD_GTEST "Build google tests" OFF)
 option(BUILD_EXAMPLES "Build examples" OFF)
+option(BUILD_BENCHMARKS "Build bencmarks" OFF)
+
+# Use release build by default
+if (NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
+endif()
 
 # GPUTreeSHAP target is header-only
 add_library(GPUTreeShap INTERFACE)
@@ -21,7 +27,6 @@ if(BUILD_GTEST)
     GIT_TAG        release-1.8.0
   )
   FetchContent_MakeAvailable(googletest)
-  #find_package(GTest REQUIRED)
   add_executable(TestGPUTreeShap tests/test_gpu_treeshap.cu)
   target_link_libraries(TestGPUTreeShap PRIVATE GPUTreeShap)
   target_compile_options(TestGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>: ${COMPILE_OPTIONS}>)
@@ -36,6 +41,23 @@ if(BUILD_EXAMPLES)
   target_link_libraries(GPUTreeShapExample PRIVATE GPUTreeShap)
   target_compile_options(GPUTreeShapExample PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${COMPILE_OPTIONS}>)
   if(NOT MSVC)
-    target_compile_options(TestGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${GCC_COMPILE_OPTIONS}>)
+    target_compile_options(GPUTreeShapExample PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${GCC_COMPILE_OPTIONS}>)
   endif()
+endif()
+
+if(BUILD_BENCHMARKS)
+  FetchContent_Declare(
+    benchmark
+    GIT_REPOSITORY https://github.com/google/benchmark.git
+    GIT_TAG        v1.5.2
+  )
+  set(BENCHMARK_ENABLE_TESTING OFF CACHE INTERNAL "Google benchmark tests off")
+  FetchContent_MakeAvailable(benchmark)
+  add_executable(BenchmarkGPUTreeShap benchmark/benchmark_gpu_treeshap.cu)
+  target_link_libraries(BenchmarkGPUTreeShap PRIVATE GPUTreeShap)
+  target_compile_options(BenchmarkGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>: ${COMPILE_OPTIONS}>)
+  if(NOT MSVC)
+    target_compile_options(BenchmarkGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${GCC_COMPILE_OPTIONS}>)
+  endif()
+  target_link_libraries(BenchmarkGPUTreeShap  PRIVATE benchmark::benchmark)
 endif()
