@@ -44,6 +44,16 @@ nvidia-smi
 $CC --version
 $CXX --version
 
+# Update git if on centos
+if [ -f /etc/redhat-release ]; then
+  yum remove git*
+  yum -y install https://packages.endpoint.com/rhel/7/os/x86_64/endpoint-repo-1.7-1.x86_64.rpm
+  yum -y install git
+  git --version
+fi
+
+export PATH=/conda/bin:$PATH
+
 ################################################################################
 # BUILD - Build tests
 ################################################################################
@@ -51,7 +61,7 @@ $CXX --version
 logger "Build C++ targets..."
 mkdir $WORKSPACE/build
 cd $WORKSPACE/build
-cmake .. -DBUILD_GTEST=ON -DBUILD_EXAMPLES=ON
+cmake .. -DBUILD_GTEST=ON -DBUILD_EXAMPLES=ON -DBUILD_BENCHMARKS=ON
 make -j
 
 ################################################################################
@@ -61,6 +71,15 @@ make -j
 logger "GoogleTest..."
 cd $WORKSPACE/build
 ./TestGPUTreeShap
+
+################################################################################
+# TEST - Run Benchmarks
+################################################################################
+logger "Benchmark..."
+cd $WORKSPACE/build
+./BenchmarkGPUTreeShap --benchmark_out=gputreeshap_bench.json --benchmark_out_format=json
+curl -L https://raw.githubusercontent.com/rapidsai/benchmark/main/parser/GBenchToASV.py --output GBenchToASV.py
+python GBenchToASV.py -d . -t ${S3_ASV_DIR} -n gputreeshap -b $(git rev-parse --abbrev-ref HEAD)
 
 ################################################################################
 # Run example
