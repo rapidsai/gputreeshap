@@ -169,7 +169,8 @@ class ContiguousGroup {
 // This functionality is available in cuda 11.0 on cc >=7.0
 // We reimplement for backwards compatibility
 // Assumes partitions are contiguous
-inline __device__ ContiguousGroup active_labeled_partition(uint32_t mask, int label) {
+inline __device__ ContiguousGroup active_labeled_partition(uint32_t mask,
+                                                           int label) {
 #if __CUDA_ARCH__ >= 700
   uint32_t subgroup_mask = __match_any_sync(mask, label);
 #else
@@ -396,7 +397,7 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
   ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(
       s_X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, &e,
       &thread_active);
-  uint32_t mask= __ballot_sync(FULL_MASK, thread_active);
+  uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
   if (!thread_active) return;
 
   float zero_fraction = e.zero_fraction;
@@ -497,7 +498,7 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
   ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(
       s_X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, e,
       &thread_active);
-  uint32_t mask= __ballot_sync(FULL_MASK, thread_active);
+  uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
   if (!thread_active) return;
 
   auto labelled_group = active_labeled_partition(mask, e->path_idx);
@@ -574,7 +575,7 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
   ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(
       s_X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, e,
       &thread_active);
-  uint32_t mask= __ballot_sync(FULL_MASK, thread_active);
+  uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
   if (!thread_active) return;
 
   auto labelled_group = active_labeled_partition(mask, e->path_idx);

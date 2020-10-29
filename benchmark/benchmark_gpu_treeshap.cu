@@ -49,7 +49,7 @@ class Fixture : public benchmark::Fixture {
   size_t num_features;
 };
 
-BENCHMARK_DEFINE_F(Fixture, GPUTreeShap)(benchmark::State& st) {
+BENCHMARK_DEFINE_F(Fixture, GPUTreeShap)(benchmark::State& st) { // NOLINT
   for (auto _ : st) {
     GPUTreeShap(X, model.begin(), model.end(), num_groups, phis->data().get(),
                 phis->size());
@@ -61,7 +61,7 @@ BENCHMARK_REGISTER_F(Fixture, GPUTreeShap)
     ->Args({10000, 50, 10, 1000})
     ->Args({100000, 500, 20, 10000});
 
-BENCHMARK_DEFINE_F(Fixture, GPUTreeShapInteractions)(benchmark::State& st) {
+BENCHMARK_DEFINE_F(Fixture, GPUTreeShapInteractions)(benchmark::State& st) {// NOLINT
   phis.reset(new thrust::device_vector<float>(X.NumRows() * (X.NumCols() + 1) *
                                               (X.NumCols() + 1) * num_groups));
   for (auto _ : st) {
@@ -77,7 +77,7 @@ BENCHMARK_REGISTER_F(Fixture, GPUTreeShapInteractions)
     ->Args({1000, 250, 20, 10000});
 
 BENCHMARK_DEFINE_F(Fixture, GPUTreeShapTaylorInteractions)
-(benchmark::State& st) {
+(benchmark::State& st) {// NOLINT
   phis.reset(new thrust::device_vector<float>(X.NumRows() * (X.NumCols() + 1) *
                                               (X.NumCols() + 1) * num_groups));
   for (auto _ : st) {
@@ -102,7 +102,7 @@ std::vector<int> GenerateCounts(size_t n, size_t max_depth) {
   return out;
 }
 
-static void BFDBinPacking(benchmark::State& state) {
+static void BFDBinPacking(benchmark::State& state) {// NOLINT
   size_t n = state.range(0);
   size_t max_depth = state.range(1);
   thrust::device_vector<int> counts = GenerateCounts(n, max_depth);

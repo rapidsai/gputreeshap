@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CUDA_STANDARD 14)
 option(BUILD_GTEST "Build google tests" OFF)
 option(BUILD_EXAMPLES "Build examples" OFF)
-option(BUILD_BENCHMARKS "Build bencmarks" OFF)
+option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 
 # Use release build by default
 if (NOT CMAKE_BUILD_TYPE)

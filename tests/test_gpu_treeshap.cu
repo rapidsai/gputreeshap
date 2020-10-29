@@ -17,16 +17,17 @@
 #include <GPUTreeShap/gpu_treeshap.h>
 #include <cooperative_groups.h>
 #include <limits>
+#include <numeric>
 #include <random>
 #include <vector>
-#include <numeric>
 #include "gtest/gtest.h"
-#include "test_utils.h"
+#include "tests/test_utils.h"
 
 using namespace gpu_treeshap;  // NOLINT
 
-class ParameterisedModelTest : public ::testing::TestWithParam<
-                        std::tuple<size_t, size_t, size_t, size_t, size_t>> {
+class ParameterisedModelTest
+    : public ::testing::TestWithParam<
+          std::tuple<size_t, size_t, size_t, size_t, size_t>> {
  protected:
   ParameterisedModelTest() {
     size_t max_depth, num_paths;
@@ -52,11 +53,11 @@ class ParameterisedModelTest : public ::testing::TestWithParam<
   size_t num_features;
 };
 
-TEST_P(ParameterisedModelTest , ShapSum) {
+TEST_P(ParameterisedModelTest, ShapSum) {
   GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.data().get(),
               phis.size());
   thrust::host_vector<float> result(phis);
-  std::vector<float > tmp(result.begin(), result.end());
+  std::vector<float> tmp(result.begin(), result.end());
   std::vector<float> sum(num_rows * num_groups);
   for (auto i = 0ull; i < num_rows; i++) {
     for (auto j = 0ull; j < num_features + 1; j++) {
@@ -71,7 +72,7 @@ TEST_P(ParameterisedModelTest , ShapSum) {
   }
 }
 
-TEST_P(ParameterisedModelTest , ShapInteractionsSum) {
+TEST_P(ParameterisedModelTest, ShapInteractionsSum) {
   thrust::device_vector<float> phis_interactions(
       X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) * num_groups);
   GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.data().get(),
@@ -102,8 +103,7 @@ TEST_P(ParameterisedModelTest , ShapInteractionsSum) {
 
 TEST_P(ParameterisedModelTest, ShapTaylorInteractionsSum) {
   GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), num_groups,
-    phis.data().get(),
-    phis.size());
+                                phis.data().get(), phis.size());
   thrust::host_vector<float> interactions_result(phis);
   std::vector<float> sum(margin.size());
   for (auto row_idx = 0ull; row_idx < num_rows; row_idx++) {
@@ -111,9 +111,9 @@ TEST_P(ParameterisedModelTest, ShapTaylorInteractionsSum) {
       for (auto i = 0ull; i < num_features + 1; i++) {
         for (auto j = 0ull; j < num_features + 1; j++) {
           size_t result_index = IndexPhiInteractions(row_idx, num_groups, group,
-            num_features, i, j);
+                                                     num_features, i, j);
           sum[row_idx * num_groups + group] +=
-            interactions_result[result_index];
+              interactions_result[result_index];
         }
       }
     }
@@ -174,8 +174,8 @@ class APITest : public ::testing::Test {
   template <typename ExceptionT>
   void ExpectAPIThrow(std::string message) {
     EXPECT_THROW_CONTAINS_MESSAGE(GPUTreeShap(X, model.begin(), model.end(), 1,
-                                          phis.data().get(), phis.size()),
-                              ExceptionT, message);
+                                              phis.data().get(), phis.size()),
+                                  ExceptionT, message);
     EXPECT_THROW_CONTAINS_MESSAGE(
         GPUTreeShapInteractions(X, model.begin(), model.end(), 1,
                                 phis.data().get(), phis.size()),
@@ -187,7 +187,7 @@ class APITest : public ::testing::Test {
   }
 
   thrust::device_vector<float> data;
-  std::vector<PathElement>  model;
+  std::vector<PathElement> model;
   DenseDatasetWrapper X;
   thrust::device_vector<float> phis;
 };
@@ -614,11 +614,12 @@ __global__ void TestActiveLabeledPartition() {
     assert(labelled_partition.thread_rank() == warp.thread_rank() - 5);
   }
 
-  bool odd=warp.thread_rank() % 2 == 1;
-  uint32_t odd_mask=__ballot_sync(FULL_MASK, odd);
-  uint32_t even_mask=__ballot_sync(FULL_MASK, !odd);
+  bool odd = warp.thread_rank() % 2 == 1;
+  uint32_t odd_mask = __ballot_sync(FULL_MASK, odd);
+  uint32_t even_mask = __ballot_sync(FULL_MASK, !odd);
   if (odd) {
-    auto labelled_partition2 = detail::active_labeled_partition(odd_mask,label);
+    auto labelled_partition2 =
+        detail::active_labeled_partition(odd_mask, label);
     if (label == 3) {
       assert(labelled_partition2.size() == 2);
       assert(labelled_partition2.thread_rank() == warp.thread_rank() / 2);
@@ -627,7 +628,8 @@ __global__ void TestActiveLabeledPartition() {
       assert(labelled_partition2.thread_rank() == (warp.thread_rank() / 2) - 2);
     }
   } else {
-    auto labelled_partition2 = detail::active_labeled_partition(even_mask,label);
+    auto labelled_partition2 =
+        detail::active_labeled_partition(even_mask, label);
     if (label == 3) {
       assert(labelled_partition2.size() == 3);
       assert(labelled_partition2.thread_rank() == warp.thread_rank() / 2);
@@ -746,7 +748,7 @@ class DeterminismTest : public ::testing::Test {
 
     X = test_data.GetDeviceWrapper();
 
-     reference_phis.resize(X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) *
+    reference_phis.resize(X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) *
                           num_groups);
   }
 
@@ -764,8 +766,8 @@ TEST_F(DeterminismTest, GPUTreeShap) {
 
   for (auto i = 0ull; i < samples; i++) {
     thrust::device_vector<float> phis(reference_phis.size());
-    GPUTreeShap(X, model.begin(), model.end(), num_groups,
-                phis.data().get(), phis.size());
+    GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.data().get(),
+                phis.size());
     ASSERT_TRUE(thrust::equal(reference_phis.begin(), reference_phis.end(),
                               phis.begin()));
   }
@@ -773,12 +775,12 @@ TEST_F(DeterminismTest, GPUTreeShap) {
 
 TEST_F(DeterminismTest, GPUTreeShapInteractions) {
   GPUTreeShapInteractions(X, model.begin(), model.end(), num_groups,
-              reference_phis.data().get(), reference_phis.size());
+                          reference_phis.data().get(), reference_phis.size());
 
   for (auto i = 0ull; i < samples; i++) {
     thrust::device_vector<float> phis(reference_phis.size());
     GPUTreeShapInteractions(X, model.begin(), model.end(), num_groups,
-                phis.data().get(), phis.size());
+                            phis.data().get(), phis.size());
     ASSERT_TRUE(thrust::equal(reference_phis.begin(), reference_phis.end(),
                               phis.begin()));
   }
@@ -786,12 +788,13 @@ TEST_F(DeterminismTest, GPUTreeShapInteractions) {
 
 TEST_F(DeterminismTest, GPUTreeShapTaylorInteractions) {
   GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), num_groups,
-              reference_phis.data().get(), reference_phis.size());
+                                reference_phis.data().get(),
+                                reference_phis.size());
 
   for (auto i = 0ull; i < samples; i++) {
     thrust::device_vector<float> phis(reference_phis.size());
     GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), num_groups,
-                phis.data().get(), phis.size());
+                                  phis.data().get(), phis.size());
     ASSERT_TRUE(thrust::equal(reference_phis.begin(), reference_phis.end(),
                               phis.begin()));
   }
