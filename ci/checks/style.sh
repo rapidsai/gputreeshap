@@ -6,11 +6,12 @@
 
 # Ignore errors and set path
 set +e
-PATH=/conda/bin:$PATH
+PATH=/opt/conda/bin:$PATH
 RETVAL="0"
 
 # Activate common conda env
-source activate gdf
+. /opt/conda/etc/profile.d/conda.sh
+conda activate rapids
 
 # Check for a consistent code format
 pip install cpplint
