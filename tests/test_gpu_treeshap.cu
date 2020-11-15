@@ -340,22 +340,6 @@ TEST_F(APITest, PhisIncorrectLength) {
   ExpectAPIThrow<std::invalid_argument>("phis_out must be at least of size");
 }
 
-TEST_F(APITest, PhisIncorrectMemory) {
-  std::vector<float> phis_host(phis.size());
-  std::string message = "phis_out must be device accessible";
-  EXPECT_THROW_CONTAINS_MESSAGE(GPUTreeShap(X, model.begin(), model.end(), 1,
-                                            phis_host.data(), phis.size()),
-                                std::invalid_argument, message);
-  EXPECT_THROW_CONTAINS_MESSAGE(
-      GPUTreeShapInteractions(X, model.begin(), model.end(), 1,
-                              phis_host.data(), phis.size()),
-      std::invalid_argument, message);
-  EXPECT_THROW_CONTAINS_MESSAGE(
-      GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), 1,
-                                    phis_host.data(), phis.size()),
-      std::invalid_argument, message);
-}
-
 // Test a simple tree and compare output to xgb shap values
 // 0:[f0<0.5] yes=1,no=2,missing=1,gain=1.63333321,cover=5
 //  1:leaf=-1,cover=2
