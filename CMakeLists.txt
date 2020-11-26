@@ -25,6 +25,7 @@ if(BUILD_GTEST)
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
     GIT_TAG        release-1.8.0
+    GIT_SHALLOW       true
   )
   FetchContent_MakeAvailable(googletest)
   add_executable(TestGPUTreeShap tests/test_gpu_treeshap.cu)
@@ -50,6 +51,7 @@ if(BUILD_BENCHMARKS)
     benchmark
     GIT_REPOSITORY https://github.com/google/benchmark.git
     GIT_TAG        v1.5.2
+    GIT_SHALLOW       true
   )
   set(BENCHMARK_ENABLE_TESTING OFF CACHE INTERNAL "Google benchmark tests off")
   FetchContent_MakeAvailable(benchmark)
