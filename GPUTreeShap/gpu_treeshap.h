@@ -159,15 +159,15 @@ class ContiguousGroup {
 // This functionality is available in cuda 11.0 on cc >=7.0
 // We reimplement for backwards compatibility
 // Assumes partitions are contiguous
-inline __device__ ContiguousGroup active_labeled_partition(int label) {
+inline __device__ ContiguousGroup active_labeled_partition(uint32_t mask,
+                                                           int label) {
 #if __CUDA_ARCH__ >= 700
-  uint32_t subgroup_mask = __match_any_sync(__activemask(), label);
+  uint32_t subgroup_mask = __match_any_sync(mask, label);
 #else
   uint32_t subgroup_mask = 0;
-  uint32_t active_mask = __activemask();
   for (int i = 0; i < 32;) {
-    int current_label = __shfl_sync(active_mask, label, i);
-    uint32_t ballot = __ballot_sync(active_mask, label == current_label);
+    int current_label = __shfl_sync(mask, label, i);
+    uint32_t ballot = __ballot_sync(mask, label == current_label);
     if (label == current_label) {
       subgroup_mask = ballot;
     }
@@ -175,7 +175,7 @@ inline __device__ ContiguousGroup active_labeled_partition(int label) {
         (1 << (32 - __clz(ballot))) - 1;  // Threads that have finished
     // Find the start of the next group, mask off completed threads from active
     // threads Then use ffs - 1 to find the position of the next group
-    int next_i = __ffs(active_mask & ~completed_mask) - 1;
+    int next_i = __ffs(mask & ~completed_mask) - 1;
     if (next_i == -1) break;  // -1 indicates all finished
     assert(next_i > i);  // Prevent infinite loops when the constraints not met
     i = next_i;
@@ -369,6 +369,7 @@ void __device__ ConfigureThread(const DatasetT& X, const size_t bins_per_row,
 }
 
 #define GPUTREESHAP_MAX_THREADS_PER_BLOCK 256
+#define FULL_MASK 0xffffffff
 
 template <typename DatasetT, size_t kBlockSize, size_t kRowsPerWarp>
 __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
@@ -386,10 +387,11 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
   ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(
       s_X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, &e,
       &thread_active);
+  uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
   if (!thread_active) return;
 
   float zero_fraction = e.zero_fraction;
-  auto labelled_group = active_labeled_partition(e.path_idx);
+  auto labelled_group = active_labeled_partition(mask, e.path_idx);
 
   for (int64_t row_idx = start_row; row_idx < end_row; row_idx++) {
     float phi = ComputePhi(e, row_idx, X, labelled_group, zero_fraction);
@@ -486,9 +488,10 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
   ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(
       s_X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, e,
       &thread_active);
+  uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
   if (!thread_active) return;
 
-  auto labelled_group = active_labeled_partition(e->path_idx);
+  auto labelled_group = active_labeled_partition(mask, e->path_idx);
 
   for (int64_t row_idx = start_row; row_idx < end_row; row_idx++) {
     float phi = ComputePhi(*e, row_idx, X, labelled_group, e->zero_fraction);
@@ -562,9 +565,10 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
   ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(
       s_X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, e,
       &thread_active);
+  uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
   if (!thread_active) return;
 
-  auto labelled_group = active_labeled_partition(e->path_idx);
+  auto labelled_group = active_labeled_partition(mask, e->path_idx);
 
   for (int64_t row_idx = start_row; row_idx < end_row; row_idx++) {
     for (auto condition_rank = 1ull; condition_rank < labelled_group.size();

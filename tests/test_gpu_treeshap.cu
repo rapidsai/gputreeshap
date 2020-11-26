@@ -17,142 +17,17 @@
 #include <GPUTreeShap/gpu_treeshap.h>
 #include <cooperative_groups.h>
 #include <limits>
+#include <numeric>
 #include <random>
 #include <vector>
-#include <numeric>
 #include "gtest/gtest.h"
-#include "../GPUTreeShap/gpu_treeshap.h"
+#include "tests/test_utils.h"
 
 using namespace gpu_treeshap;  // NOLINT
 
-class DenseDatasetWrapper {
-  const float* data;
-  int num_rows;
-  int num_cols;
-
- public:
-  DenseDatasetWrapper() = default;
-  DenseDatasetWrapper(const float* data, int num_rows, int num_cols)
-      : data(data), num_rows(num_rows), num_cols(num_cols) {}
-  __device__ float GetElement(size_t row_idx, size_t col_idx) const {
-    return data[row_idx * num_cols + col_idx];
-  }
-  __host__ __device__ size_t NumRows() const { return num_rows; }
-  __host__ __device__ size_t NumCols() const { return num_cols; }
-};
-
-class TestDataset {
- public:
-  std::vector<float> host_data;
-  thrust::device_vector<float> device_data;
-  size_t num_rows;
-  size_t num_cols;
-  TestDataset() = default;
-  TestDataset(size_t num_rows, size_t num_cols, size_t seed,
-              float missing_fraction = 0.25)
-      : num_rows(num_rows), num_cols(num_cols) {
-    std::mt19937 gen(seed);
-    std::uniform_real_distribution<float> dis;
-    std::bernoulli_distribution bern(missing_fraction);
-    host_data.resize(num_rows * num_cols);
-    for (auto& e : host_data) {
-      e = bern(gen) ? std::numeric_limits<float>::quiet_NaN() : dis(gen);
-    }
-    device_data = host_data;
-  }
-  DenseDatasetWrapper GetDeviceWrapper() {
-    return DenseDatasetWrapper(device_data.data().get(), num_rows, num_cols);
-  }
-};
-
-void GenerateModel(std::vector<PathElement>* model, int group, size_t max_depth,
-                   size_t num_features, size_t num_paths, std::mt19937* gen,
-                   float max_v) {
-  std::uniform_real_distribution<float> value_dis(-max_v, max_v);
-  std::uniform_int_distribution<int64_t> feature_dis(0, num_features - 1);
-  std::bernoulli_distribution bern_dis;
-  const float inf = std::numeric_limits<float>::infinity();
-  size_t base_path_idx = model->empty() ? 0 : model->back().path_idx + 1;
-  float z = std::pow(0.5, 1.0 / max_depth);
-  for (auto i = 0ull; i < num_paths; i++) {
-    float v = value_dis(*gen);
-    model->emplace_back(
-        PathElement{base_path_idx + i, -1, group, -inf, inf, false, 1.0, v});
-    for (auto j = 0ull; j < max_depth; j++) {
-      float lower_bound = -inf;
-      float upper_bound = inf;
-      // If the input feature value x_i is a uniform rv in [0,1)
-      // We want a 50% chance of it reaching the end of this path
-      // Each test should succeed with probability 0.5^(1/max_depth)
-      std::uniform_real_distribution<float> bound_dis(0.0, 2.0 - 2 * z);
-      if (bern_dis(*gen)) {
-        lower_bound = bound_dis(*gen);
-      } else {
-        upper_bound = 1.0f - bound_dis(*gen);
-      }
-      // Don't make the zero fraction too small
-      std::uniform_real_distribution<float> zero_fraction_dis(0.05, 1.0);
-      model->emplace_back(
-          PathElement{base_path_idx + i, feature_dis(*gen), group, lower_bound,
-                      upper_bound, bern_dis(*gen), zero_fraction_dis(*gen), v});
-    }
-  }
-}
-
-std::vector<PathElement> GenerateEnsembleModel(size_t num_groups,
-                                               size_t max_depth,
-                                               size_t num_features,
-                                               size_t num_paths, size_t seed,
-                                               float max_v = 1.0f) {
-  std::mt19937 gen(seed);
-  std::vector<PathElement> model;
-  for (auto group = 0llu; group < num_groups; group++) {
-    GenerateModel(&model, group, max_depth, num_features, num_paths, &gen,
-                  max_v);
-  }
-  return model;
-}
-
-std::vector<float> Predict(const std::vector<PathElement>& model,
-                           const TestDataset& X, size_t num_groups) {
-  std::vector<float> predictions(X.num_rows * num_groups);
-  for (auto i = 0ull; i < X.num_rows; i++) {
-    const float* row = X.host_data.data() + i * X.num_cols;
-    float current_v = model.front().v;
-    size_t current_path_idx = model.front().path_idx;
-    int current_group = model.front().group;
-    bool valid = true;
-    for (const auto& e : model) {
-      if (e.path_idx != current_path_idx) {
-        if (valid) {
-          predictions[i * num_groups + current_group] += current_v;
-        }
-        current_v = e.v;
-        current_path_idx = e.path_idx;
-        current_group = e.group;
-        valid = true;
-      }
-
-      if (e.feature_idx != -1) {
-        float fval = row[e.feature_idx];
-        if (std::isnan(fval)) {
-          valid = valid && e.is_missing_branch;
-        } else if (fval < e.feature_lower_bound ||
-                   fval >= e.feature_upper_bound) {
-          valid = false;
-        }
-      }
-    }
-    if (valid) {
-      predictions[i * num_groups + current_group] += current_v;
-    }
-  }
-
-  return predictions;
-}
-
-class ParameterisedModelTest : public ::testing::TestWithParam<
-                        std::tuple<size_t, size_t, size_t, size_t, size_t>> {
+class ParameterisedModelTest
+    : public ::testing::TestWithParam<
+          std::tuple<size_t, size_t, size_t, size_t, size_t>> {
  protected:
   ParameterisedModelTest() {
     size_t max_depth, num_paths;
@@ -178,11 +53,11 @@ class ParameterisedModelTest : public ::testing::TestWithParam<
   size_t num_features;
 };
 
-TEST_P(ParameterisedModelTest , ShapSum) {
+TEST_P(ParameterisedModelTest, ShapSum) {
   GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.data().get(),
               phis.size());
   thrust::host_vector<float> result(phis);
-  std::vector<float > tmp(result.begin(), result.end());
+  std::vector<float> tmp(result.begin(), result.end());
   std::vector<float> sum(num_rows * num_groups);
   for (auto i = 0ull; i < num_rows; i++) {
     for (auto j = 0ull; j < num_features + 1; j++) {
@@ -197,7 +72,7 @@ TEST_P(ParameterisedModelTest , ShapSum) {
   }
 }
 
-TEST_P(ParameterisedModelTest , ShapInteractionsSum) {
+TEST_P(ParameterisedModelTest, ShapInteractionsSum) {
   thrust::device_vector<float> phis_interactions(
       X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) * num_groups);
   GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.data().get(),
@@ -228,8 +103,7 @@ TEST_P(ParameterisedModelTest , ShapInteractionsSum) {
 
 TEST_P(ParameterisedModelTest, ShapTaylorInteractionsSum) {
   GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), num_groups,
-    phis.data().get(),
-    phis.size());
+                                phis.data().get(), phis.size());
   thrust::host_vector<float> interactions_result(phis);
   std::vector<float> sum(margin.size());
   for (auto row_idx = 0ull; row_idx < num_rows; row_idx++) {
@@ -237,9 +111,9 @@ TEST_P(ParameterisedModelTest, ShapTaylorInteractionsSum) {
       for (auto i = 0ull; i < num_features + 1; i++) {
         for (auto j = 0ull; j < num_features + 1; j++) {
           size_t result_index = IndexPhiInteractions(row_idx, num_groups, group,
-            num_features, i, j);
+                                                     num_features, i, j);
           sum[row_idx * num_groups + group] +=
-            interactions_result[result_index];
+              interactions_result[result_index];
         }
       }
     }
@@ -300,8 +174,8 @@ class APITest : public ::testing::Test {
   template <typename ExceptionT>
   void ExpectAPIThrow(std::string message) {
     EXPECT_THROW_CONTAINS_MESSAGE(GPUTreeShap(X, model.begin(), model.end(), 1,
-                                          phis.data().get(), phis.size()),
-                              ExceptionT, message);
+                                              phis.data().get(), phis.size()),
+                                  ExceptionT, message);
     EXPECT_THROW_CONTAINS_MESSAGE(
         GPUTreeShapInteractions(X, model.begin(), model.end(), 1,
                                 phis.data().get(), phis.size()),
@@ -313,7 +187,7 @@ class APITest : public ::testing::Test {
   }
 
   thrust::device_vector<float> data;
-  std::vector<PathElement>  model;
+  std::vector<PathElement> model;
   DenseDatasetWrapper X;
   thrust::device_vector<float> phis;
 };
@@ -470,7 +344,9 @@ __global__ void TestExtendKernel(DatasetT X, size_t num_path_elements,
   auto group =
       cooperative_groups::tiled_partition<32, cooperative_groups::thread_block>(
           block);
-  if (group.thread_rank() >= num_path_elements) return;
+  bool thread_active = threadIdx.x < num_path_elements;
+  uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
+  if (!thread_active) return;
 
   // Test first training instance
   cooperative_groups::coalesced_group active_group =
@@ -478,7 +354,7 @@ __global__ void TestExtendKernel(DatasetT X, size_t num_path_elements,
   PathElement e = path_elements[active_group.thread_rank()];
   float one_fraction = detail::GetOneFraction(e, X, 0);
   float zero_fraction = e.zero_fraction;
-  auto labelled_group = detail::active_labeled_partition(0);
+  auto labelled_group = detail::active_labeled_partition(mask, 0);
   TestGroupPath path(labelled_group, zero_fraction, one_fraction);
   path.Extend();
   assert(path.unique_depth_ == 1);
@@ -602,11 +478,13 @@ __global__ void TestExtendMultipleKernel(DatasetT X, size_t n_first,
   auto warp =
       cooperative_groups::tiled_partition<32, cooperative_groups::thread_block>(
           block);
-  if (warp.thread_rank() >= n_first + n_second) return;
+  bool thread_active = threadIdx.x < n_first + n_second;
+  uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
+  if (!thread_active) return;
   cooperative_groups::coalesced_group active_group =
       cooperative_groups::coalesced_threads();
   int label = warp.thread_rank() >= n_first;
-  auto labeled_group = detail::active_labeled_partition(label);
+  auto labeled_group = detail::active_labeled_partition(mask, label);
   PathElement e = path_elements[warp.thread_rank()];
 
   // Test first training instance
@@ -710,7 +588,7 @@ __global__ void TestActiveLabeledPartition() {
       cooperative_groups::tiled_partition<32, cooperative_groups::thread_block>(
           block);
   int label = warp.thread_rank() < 5 ? 3 : 6;
-  auto labelled_partition = detail::active_labeled_partition(label);
+  auto labelled_partition = detail::active_labeled_partition(FULL_MASK, label);
 
   if (label == 3) {
     assert(labelled_partition.size() == 5);
@@ -720,8 +598,12 @@ __global__ void TestActiveLabeledPartition() {
     assert(labelled_partition.thread_rank() == warp.thread_rank() - 5);
   }
 
-  if (warp.thread_rank() % 2 == 1) {
-    auto labelled_partition2 = detail::active_labeled_partition(label);
+  bool odd = warp.thread_rank() % 2 == 1;
+  uint32_t odd_mask = __ballot_sync(FULL_MASK, odd);
+  uint32_t even_mask = __ballot_sync(FULL_MASK, !odd);
+  if (odd) {
+    auto labelled_partition2 =
+        detail::active_labeled_partition(odd_mask, label);
     if (label == 3) {
       assert(labelled_partition2.size() == 2);
       assert(labelled_partition2.thread_rank() == warp.thread_rank() / 2);
@@ -730,7 +612,8 @@ __global__ void TestActiveLabeledPartition() {
       assert(labelled_partition2.thread_rank() == (warp.thread_rank() / 2) - 2);
     }
   } else {
-    auto labelled_partition2 = detail::active_labeled_partition(label);
+    auto labelled_partition2 =
+        detail::active_labeled_partition(even_mask, label);
     if (label == 3) {
       assert(labelled_partition2.size() == 3);
       assert(labelled_partition2.thread_rank() == warp.thread_rank() / 2);
@@ -816,7 +699,7 @@ TEST(GPUTreeShap, FFDBinPacking) {
 __global__ void TestContiguousGroup() {
   int label = threadIdx.x > 2 && threadIdx.x < 6 ? 1 : threadIdx.x >= 6 ? 2 : 0;
 
-  auto group = detail::active_labeled_partition(label);
+  auto group = detail::active_labeled_partition(FULL_MASK, label);
 
   if (label == 1) {
     assert(group.size() == 3);
@@ -849,7 +732,7 @@ class DeterminismTest : public ::testing::Test {
 
     X = test_data.GetDeviceWrapper();
 
-     reference_phis.resize(X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) *
+    reference_phis.resize(X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) *
                           num_groups);
   }
 
@@ -867,8 +750,8 @@ TEST_F(DeterminismTest, GPUTreeShap) {
 
   for (auto i = 0ull; i < samples; i++) {
     thrust::device_vector<float> phis(reference_phis.size());
-    GPUTreeShap(X, model.begin(), model.end(), num_groups,
-                phis.data().get(), phis.size());
+    GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.data().get(),
+                phis.size());
     ASSERT_TRUE(thrust::equal(reference_phis.begin(), reference_phis.end(),
                               phis.begin()));
   }
@@ -876,12 +759,12 @@ TEST_F(DeterminismTest, GPUTreeShap) {
 
 TEST_F(DeterminismTest, GPUTreeShapInteractions) {
   GPUTreeShapInteractions(X, model.begin(), model.end(), num_groups,
-              reference_phis.data().get(), reference_phis.size());
+                          reference_phis.data().get(), reference_phis.size());
 
   for (auto i = 0ull; i < samples; i++) {
     thrust::device_vector<float> phis(reference_phis.size());
     GPUTreeShapInteractions(X, model.begin(), model.end(), num_groups,
-                phis.data().get(), phis.size());
+                            phis.data().get(), phis.size());
     ASSERT_TRUE(thrust::equal(reference_phis.begin(), reference_phis.end(),
                               phis.begin()));
   }
@@ -889,12 +772,13 @@ TEST_F(DeterminismTest, GPUTreeShapInteractions) {
 
 TEST_F(DeterminismTest, GPUTreeShapTaylorInteractions) {
   GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), num_groups,
-              reference_phis.data().get(), reference_phis.size());
+                                reference_phis.data().get(),
+                                reference_phis.size());
 
   for (auto i = 0ull; i < samples; i++) {
     thrust::device_vector<float> phis(reference_phis.size());
     GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), num_groups,
-                phis.data().get(), phis.size());
+                                  phis.data().get(), phis.size());
     ASSERT_TRUE(thrust::equal(reference_phis.begin(), reference_phis.end(),
                               phis.begin()));
   }

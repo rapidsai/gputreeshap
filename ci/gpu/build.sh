@@ -34,15 +34,6 @@ sh cmake-3.18.2-Linux-x86_64.sh --skip-license
 export PATH=$PATH:$PWD/bin
 cd ..
 
-logger "Install gtest..."
-wget https://github.com/google/googletest/archive/release-1.10.0.zip
-unzip release-1.10.0.zip
-mv googletest-release-1.10.0 gtest && cd gtest
-cmake . && make
-cp -r googletest/include include
-export GTEST_ROOT=$PWD
-cd ..
-
 logger "Check environment..."
 env
 
@@ -53,6 +44,7 @@ nvidia-smi
 $CC --version
 $CXX --version
 
+
 ################################################################################
 # BUILD - Build tests
 ################################################################################
@@ -60,7 +52,7 @@ $CXX --version
 logger "Build C++ targets..."
 mkdir $WORKSPACE/build
 cd $WORKSPACE/build
-cmake .. -DBUILD_GTEST=ON -DBUILD_EXAMPLES=ON
+cmake .. -DBUILD_GTEST=ON -DBUILD_EXAMPLES=ON -DBUILD_BENCHMARKS=ON
 make -j
 
 ################################################################################

@@ -64,7 +64,7 @@ void RecursivePrint(std::ostream& os, const DecisionTree& dt, int node_idx,
   if (node_idx == -1) return;
   DecisionTree::Node node = dt.nodes[node_idx];
 
-  for (auto i = 0ull; i < depth; i++) {
+  for (int i = 0; i < depth; i++) {
     os << "\t";
   }
   os << node_idx << ":";
@@ -90,11 +90,11 @@ std::vector<gpu_treeshap::PathElement> ExtractPaths(const DecisionTree& dt) {
   // Find leaf nodes
   // Work backwards from leaf to root, order does not matter
   // It's also possible to work from root to leaf
-  for (auto i = 0ull; i < dt.nodes.size(); i++) {
+  for (int i = 0; i <static_cast<int>(dt.nodes.size()); i++) {
     if (dt.nodes[i].IsLeaf()) {
       auto child = dt.nodes[i];
       float v = child.leaf_value;
-      size_t child_idx = i;
+      int child_idx = i;
       const float inf = std::numeric_limits<float>::infinity();
       while (!child.IsRoot()) {
         auto parent = dt.nodes[child.parent];
