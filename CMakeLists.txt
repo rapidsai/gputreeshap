@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.11 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 include(FetchContent)
 project(GPUTreeShap LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 14)
@@ -21,10 +21,11 @@ target_include_directories(GPUTreeShap INTERFACE ${GPUTreeShap_SOURCE_DIR})
 set(COMPILE_OPTIONS --expt-extended-lambda -lineinfo)
 set(GCC_COMPILE_OPTIONS -Xcompiler -Werror,-Wall,-Wextra)
 if(BUILD_GTEST)
+  set(gtest_force_shared_crt ON CACHE BOOL "Always use msvcrt.dll")
   FetchContent_Declare(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG        release-1.8.0
+    GIT_TAG        release-1.8.1
     GIT_SHALLOW       true
   )
   FetchContent_MakeAvailable(googletest)
@@ -33,6 +34,7 @@ if(BUILD_GTEST)
   target_compile_options(TestGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>: ${COMPILE_OPTIONS}>)
   if(NOT MSVC)
     target_compile_options(TestGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${GCC_COMPILE_OPTIONS}>)
+  else()
   endif()
   target_link_libraries(TestGPUTreeShap  PRIVATE gtest gtest_main)
 endif()
