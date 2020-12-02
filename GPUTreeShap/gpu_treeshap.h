@@ -63,6 +63,38 @@ struct PathElement {
   float v;  // Leaf weight at the end of the path
 };
 
+// Helper function that accepts an index into a flat contiguous array and the
+// dimensions of a tensor and returns the indices with respect to the tensor
+template <typename T, size_t N>
+__device__ void FlatIdxToTensorIdx(T flat_idx, const T (&shape)[N],
+                                   T (&out_idx)[N]) {
+  T current_size = shape[0];
+  for (auto i = 1ull; i < N; i++) {
+    current_size *= shape[i];
+  }
+  for (auto i = 0ull; i < N; i++) {
+    current_size /= shape[i];
+    out_idx[i] = flat_idx / current_size;
+    flat_idx -= current_size * out_idx[i];
+  }
+}
+
+// Given a shape and coordinates into a tensor, return the index into the
+// backing storage one-dimensional array
+template <typename T, size_t N>
+__device__ T TensorIdxToFlatIdx(const T (&shape)[N], const T (&tensor_idx)[N]) {
+  T current_size = shape[0];
+  for (auto i = 1ull; i < N; i++) {
+    current_size *= shape[i];
+  }
+  T idx = 0;
+  for (auto i = 0ull; i < N; i++) {
+    current_size /= shape[i];
+    idx += tensor_idx[i] * current_size;
+  }
+  return idx;
+}
+
 // Maps values to the phi array according to row, group and column
 __host__ __device__ inline size_t IndexPhi(size_t row_idx, size_t num_groups,
                                            size_t group, size_t num_columns,
@@ -398,7 +430,7 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
 
     if (!e.IsRoot()) {
       atomicAddDouble(&phis[IndexPhi(row_idx, num_groups, e.group, X.NumCols(),
-                                     e.feature_idx)],
+                                       e.feature_idx)],
                       phi);
     }
   }
