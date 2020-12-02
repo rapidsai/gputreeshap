@@ -54,8 +54,8 @@ class ParameterisedModelTest
 };
 
 TEST_P(ParameterisedModelTest, ShapSum) {
-  GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.data().get(),
-              phis.size());
+  GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.begin(),
+              phis.end());
   thrust::host_vector<float> result(phis);
   std::vector<float> tmp(result.begin(), result.end());
   std::vector<float> sum(num_rows * num_groups);
@@ -75,11 +75,11 @@ TEST_P(ParameterisedModelTest, ShapSum) {
 TEST_P(ParameterisedModelTest, ShapInteractionsSum) {
   thrust::device_vector<float> phis_interactions(
       X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) * num_groups);
-  GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.data().get(),
-              phis.size());
+  GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.begin(),
+              phis.end());
   GPUTreeShapInteractions(X, model.begin(), model.end(), num_groups,
-                          phis_interactions.data().get(),
-                          phis_interactions.size());
+                          phis_interactions.begin(),
+                          phis_interactions.end());
   thrust::host_vector<float> interactions_result(phis_interactions);
   std::vector<float> sum(phis.size());
   for (auto row_idx = 0ull; row_idx < num_rows; row_idx++) {
@@ -103,7 +103,7 @@ TEST_P(ParameterisedModelTest, ShapInteractionsSum) {
 
 TEST_P(ParameterisedModelTest, ShapTaylorInteractionsSum) {
   GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), num_groups,
-                                phis.data().get(), phis.size());
+                                phis.begin(), phis.end());
   thrust::host_vector<float> interactions_result(phis);
   std::vector<float> sum(margin.size());
   for (auto row_idx = 0ull; row_idx < num_rows; row_idx++) {
@@ -174,15 +174,15 @@ class APITest : public ::testing::Test {
   template <typename ExceptionT>
   void ExpectAPIThrow(std::string message) {
     EXPECT_THROW_CONTAINS_MESSAGE(GPUTreeShap(X, model.begin(), model.end(), 1,
-                                              phis.data().get(), phis.size()),
+                                              phis.begin(), phis.end()),
                                   ExceptionT, message);
     EXPECT_THROW_CONTAINS_MESSAGE(
         GPUTreeShapInteractions(X, model.begin(), model.end(), 1,
-                                phis.data().get(), phis.size()),
+                                phis.begin(), phis.end()),
         ExceptionT, message);
     EXPECT_THROW_CONTAINS_MESSAGE(
         GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), 1,
-                                      phis.data().get(), phis.size()),
+                                      phis.begin(), phis.end()),
         ExceptionT, message);
   }
 
@@ -243,7 +243,7 @@ TEST(GPUTreeShap, BasicPaths) {
   DenseDatasetWrapper X(data.data().get(), 2, 3);
   size_t num_trees = 1;
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
-  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(), phis.size());
+  GPUTreeShap(X, path.begin(), path.end(), 1, phis.begin(), phis.end());
   thrust::host_vector<float> result(phis);
   // First instance
   EXPECT_NEAR(result[0], 0.6277778f * num_trees, 1e-5);
@@ -278,8 +278,8 @@ TEST(GPUTreeShap, BasicPathsInteractions) {
   DenseDatasetWrapper X(data.data().get(), 2, 3);
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1) *
                                     (X.NumCols() + 1));
-  GPUTreeShapInteractions(X, path.begin(), path.end(), 1, phis.data().get(),
-                          phis.size());
+  GPUTreeShapInteractions(X, path.begin(), path.end(), 1, phis.begin(),
+                          phis.end());
   std::vector<float> result(phis.begin(), phis.end());
   std::vector<float> expected_result = {
       0.46111116,  0.125,       0.04166666,  0.,          0.125,
@@ -314,7 +314,7 @@ TEST(GPUTreeShap, BasicPathsWithDuplicates) {
   DenseDatasetWrapper X(data.data().get(), 1, 1);
   size_t num_trees = 1;
   thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
-  GPUTreeShap(X, path.begin(), path.end(), 1, phis.data().get(), phis.size());
+  GPUTreeShap(X, path.begin(), path.end(), 1, phis.begin(), phis.end());
   thrust::host_vector<float> result(phis);
   // First instance
   EXPECT_FLOAT_EQ(result[0], 1.1666666f * num_trees);
@@ -728,7 +728,7 @@ class DeterminismTest : public ::testing::Test {
     samples = 100;
     model = GenerateEnsembleModel(num_groups, max_depth, num_features,
                                   num_paths, 78);
-    test_data = TestDataset(num_rows, num_features, 22, 1e15);
+    test_data = TestDataset(num_rows, num_features, 22, 1e-15);
 
     X = test_data.GetDeviceWrapper();
 
@@ -746,12 +746,12 @@ class DeterminismTest : public ::testing::Test {
 
 TEST_F(DeterminismTest, GPUTreeShap) {
   GPUTreeShap(X, model.begin(), model.end(), num_groups,
-              reference_phis.data().get(), reference_phis.size());
+              reference_phis.begin(), reference_phis.end());
 
   for (auto i = 0ull; i < samples; i++) {
     thrust::device_vector<float> phis(reference_phis.size());
-    GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.data().get(),
-                phis.size());
+    GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.begin(),
+                phis.end());
     ASSERT_TRUE(thrust::equal(reference_phis.begin(), reference_phis.end(),
                               phis.begin()));
   }
@@ -759,12 +759,12 @@ TEST_F(DeterminismTest, GPUTreeShap) {
 
 TEST_F(DeterminismTest, GPUTreeShapInteractions) {
   GPUTreeShapInteractions(X, model.begin(), model.end(), num_groups,
-                          reference_phis.data().get(), reference_phis.size());
+                          reference_phis.begin(), reference_phis.end());
 
   for (auto i = 0ull; i < samples; i++) {
     thrust::device_vector<float> phis(reference_phis.size());
     GPUTreeShapInteractions(X, model.begin(), model.end(), num_groups,
-                            phis.data().get(), phis.size());
+                            phis.begin(), phis.end());
     ASSERT_TRUE(thrust::equal(reference_phis.begin(), reference_phis.end(),
                               phis.begin()));
   }
@@ -772,13 +772,13 @@ TEST_F(DeterminismTest, GPUTreeShapInteractions) {
 
 TEST_F(DeterminismTest, GPUTreeShapTaylorInteractions) {
   GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), num_groups,
-                                reference_phis.data().get(),
-                                reference_phis.size());
+                                reference_phis.begin(),
+                                reference_phis.end());
 
   for (auto i = 0ull; i < samples; i++) {
     thrust::device_vector<float> phis(reference_phis.size());
     GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), num_groups,
-                                  phis.data().get(), phis.size());
+                                  phis.begin(), phis.end());
     ASSERT_TRUE(thrust::equal(reference_phis.begin(), reference_phis.end(),
                               phis.begin()));
   }
@@ -807,8 +807,8 @@ TEST(GPUTreeShap, TaylorInteractionsPaperExample) {
   thrust::device_vector<float> interaction_phis(
       X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1));
   GPUTreeShapTaylorInteractions(X, path.begin(), path.end(), 1,
-                                interaction_phis.data().get(),
-                                interaction_phis.size());
+                                interaction_phis.begin(),
+                                interaction_phis.end());
 
   std::vector<float> interactions_result(interaction_phis.begin(),
                                          interaction_phis.end());
@@ -833,8 +833,8 @@ TEST(GPUTreeShap, TaylorInteractionsBasic) {
   thrust::device_vector<float> interaction_phis(
       X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1));
   GPUTreeShapTaylorInteractions(X, path.begin(), path.end(), 1,
-                                interaction_phis.data().get(),
-                                interaction_phis.size());
+                                interaction_phis.begin(),
+                                interaction_phis.end());
 
   thrust::host_vector<float> interactions_result(interaction_phis);
   float sum =
