@@ -43,7 +43,7 @@ class ParameterisedModelTest
     phis.resize(X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) *
                 num_groups);
   }
-  std::vector<PathElement> model;
+  std::vector<PathElement<XgboostSplitCondition>> model;
   TestDataset test_data;
   DenseDatasetWrapper X;
   std::vector<float> margin;
@@ -78,8 +78,7 @@ TEST_P(ParameterisedModelTest, ShapInteractionsSum) {
   GPUTreeShap(X, model.begin(), model.end(), num_groups, phis.begin(),
               phis.end());
   GPUTreeShapInteractions(X, model.begin(), model.end(), num_groups,
-                          phis_interactions.begin(),
-                          phis_interactions.end());
+                          phis_interactions.begin(), phis_interactions.end());
   thrust::host_vector<float> interactions_result(phis_interactions);
   std::vector<float> sum(phis.size());
   for (auto row_idx = 0ull; row_idx < num_rows; row_idx++) {
@@ -161,11 +160,11 @@ class APITest : public ::testing::Test {
   APITest() {
     const float inf = std::numeric_limits<float>::infinity();
     model = {
-        PathElement{0, -1, 0, -inf, inf, false, 1.0f, 2.0f},
-        {0, 0, 0, 0.5f, inf, false, 0.25f, 2.0f},
-        {0, 1, 0, 0.5f, inf, false, 0.5f, 2.0f},
-        {0, 2, 0, 0.5f, inf, false, 0.6f, 2.0f},
-        {0, 3, 0, 0.5f, inf, false, 1.0f, 2.0f},
+        {0, -1, 0, {-inf, inf, false}, 1.0f, 2.0f},
+        {0, 0, 0, {0.5f, inf, false}, 0.25f, 2.0f},
+        {0, 1, 0, {0.5f, inf, false}, 0.5f, 2.0f},
+        {0, 2, 0, {0.5f, inf, false}, 0.6f, 2.0f},
+        {0, 3, 0, {0.5f, inf, false}, 1.0f, 2.0f},
     };
     data = std::vector<float>({1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f});
     X = DenseDatasetWrapper(data.data().get(), 2, 4);
@@ -173,12 +172,12 @@ class APITest : public ::testing::Test {
   }
   template <typename ExceptionT>
   void ExpectAPIThrow(std::string message) {
-    EXPECT_THROW_CONTAINS_MESSAGE(GPUTreeShap(X, model.begin(), model.end(), 1,
-                                              phis.begin(), phis.end()),
-                                  ExceptionT, message);
     EXPECT_THROW_CONTAINS_MESSAGE(
-        GPUTreeShapInteractions(X, model.begin(), model.end(), 1,
-                                phis.begin(), phis.end()),
+        GPUTreeShap(X, model.begin(), model.end(), 1, phis.begin(), phis.end()),
+        ExceptionT, message);
+    EXPECT_THROW_CONTAINS_MESSAGE(
+        GPUTreeShapInteractions(X, model.begin(), model.end(), 1, phis.begin(),
+                                phis.end()),
         ExceptionT, message);
     EXPECT_THROW_CONTAINS_MESSAGE(
         GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), 1,
@@ -187,23 +186,23 @@ class APITest : public ::testing::Test {
   }
 
   thrust::device_vector<float> data;
-  std::vector<PathElement> model;
+  std::vector<PathElement<XgboostSplitCondition>> model;
   DenseDatasetWrapper X;
   thrust::device_vector<float> phis;
 };
 
 TEST_F(APITest, PathTooLong) {
   model.resize(33);
-  model[0] = PathElement(0, -1, 0, 0, 0, 0, 0, 0);
-  for (auto i = 1ull; i < model.size(); i++) {
-    model[i] = PathElement(0, i, 0, 0, 0, 0, 0, 0);
+  model[0] = {0, -1, 0, {0, 0, 0}, 0, 0};
+  for (int64_t i = 1; i < model.size(); i++) {
+    model[i] = {0, i, 0, {0, 0, 0}, 0, 0};
   }
   ExpectAPIThrow<std::invalid_argument>("Tree depth must be <= 32");
 }
 
 TEST_F(APITest, PathVIncorrect) {
-  model = {PathElement(0, -1, 0, 0.0f, 0.0f, false, 0.0, 1.0f),
-           {0, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.5f}};
+  model = {{0, -1, 0, {0.0f, 0.0f, false}, 0.0, 1.0f},
+           {0, 0, 0, {0.0f, 0.0f, false}, 0.0f, 0.5f}};
 
   ExpectAPIThrow<std::invalid_argument>(
       "Leaf value v should be the same across a single path");
@@ -224,20 +223,20 @@ TEST_F(APITest, PhisIncorrectLength) {
 //      6:leaf=0.5,cover=1
 TEST(GPUTreeShap, BasicPaths) {
   const float inf = std::numeric_limits<float>::infinity();
-  std::vector<PathElement> path{
-      PathElement{0, -1, 0, -inf, inf, false, 1.0f, 0.5f},
-      {0, 0, 0, 0.5f, inf, false, 0.6f, 0.5f},
-      {0, 1, 0, 0.5f, inf, false, 2.0f / 3, 0.5f},
-      {0, 2, 0, 0.5f, inf, false, 0.5f, 0.5f},
-      {1, -1, 0, -inf, 0.0f, false, 1.0f, 1.0f},
-      {1, 0, 0, 0.5f, inf, false, 0.6f, 1.0f},
-      {1, 1, 0, 0.5f, inf, false, 2.0f / 3, 1.0f},
-      {1, 2, 0, -inf, 0.5f, false, 0.5f, 1.0f},
-      {2, -1, 0, -inf, 0.0f, false, 1.0f, -1},
-      {2, 0, 0, 0.5f, inf, false, 0.6f, -1.0f},
-      {2, 1, 0, -inf, 0.5f, false, 1.0f / 3, -1.0f},
-      {3, -1, 0, -inf, 0.0f, false, 1.0f, -1.0f},
-      {3, 0, 0, -inf, 0.5f, false, 0.4f, -1.0f}};
+  std::vector<PathElement<XgboostSplitCondition>> path{
+      {0, -1, 0, {-inf, inf, false}, 1.0f, 0.5f},
+      {0, 0, 0, {0.5f, inf, false}, 0.6f, 0.5f},
+      {0, 1, 0, {0.5f, inf, false}, 2.0f / 3, 0.5f},
+      {0, 2, 0, {0.5f, inf, false}, 0.5f, 0.5f},
+      {1, -1, 0, {-inf, 0.0f, false}, 1.0f, 1.0f},
+      {1, 0, 0, {0.5f, inf, false}, 0.6f, 1.0f},
+      {1, 1, 0, {0.5f, inf, false}, 2.0f / 3, 1.0f},
+      {1, 2, 0, {-inf, 0.5f, false}, 0.5f, 1.0f},
+      {2, -1, 0, {-inf, 0.0f, false}, 1.0f, -1},
+      {2, 0, 0, {0.5f, inf, false}, 0.6f, -1.0f},
+      {2, 1, 0, {-inf, 0.5f, false}, 1.0f / 3, -1.0f},
+      {3, -1, 0, {-inf, 0.0f, false}, 1.0f, -1.0f},
+      {3, 0, 0, {-inf, 0.5f, false}, 0.4f, -1.0f}};
   thrust::device_vector<float> data =
       std::vector<float>({1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f});
   DenseDatasetWrapper X(data.data().get(), 2, 3);
@@ -259,20 +258,20 @@ TEST(GPUTreeShap, BasicPaths) {
 
 TEST(GPUTreeShap, BasicPathsInteractions) {
   const float inf = std::numeric_limits<float>::infinity();
-  std::vector<PathElement> path{
-      PathElement{0, -1, 0, -inf, inf, false, 1.0f, 0.5f},
-      {0, 0, 0, 0.5f, inf, false, 0.6f, 0.5f},
-      {0, 1, 0, 0.5f, inf, false, 2.0f / 3, 0.5f},
-      {0, 2, 0, 0.5f, inf, false, 0.5f, 0.5f},
-      {1, -1, 0, -inf, 0.0f, false, 1.0f, 1.0f},
-      {1, 0, 0, 0.5f, inf, false, 0.6f, 1.0f},
-      {1, 1, 0, 0.5f, inf, false, 2.0f / 3, 1.0f},
-      {1, 2, 0, -inf, 0.5f, false, 0.5f, 1.0f},
-      {2, -1, 0, -inf, 0.0f, false, 1.0f, -1},
-      {2, 0, 0, 0.5f, inf, false, 0.6f, -1.0f},
-      {2, 1, 0, -inf, 0.5f, false, 1.0f / 3, -1.0f},
-      {3, -1, 0, -inf, 0.0f, false, 1.0f, -1.0f},
-      {3, 0, 0, -inf, 0.5f, false, 0.4f, -1.0f}};
+  std::vector<PathElement<XgboostSplitCondition>> path{
+      {0, -1, 0, {-inf, inf, false}, 1.0f, 0.5f},
+      {0, 0, 0, {0.5f, inf, false}, 0.6f, 0.5f},
+      {0, 1, 0, {0.5f, inf, false}, 2.0f / 3, 0.5f},
+      {0, 2, 0, {0.5f, inf, false}, 0.5f, 0.5f},
+      {1, -1, 0, {-inf, 0.0f, false}, 1.0f, 1.0f},
+      {1, 0, 0, {0.5f, inf, false}, 0.6f, 1.0f},
+      {1, 1, 0, {0.5f, inf, false}, 2.0f / 3, 1.0f},
+      {1, 2, 0, {-inf, 0.5f, false}, 0.5f, 1.0f},
+      {2, -1, 0, {-inf, 0.0f, false}, 1.0f, -1},
+      {2, 0, 0, {0.5f, inf, false}, 0.6f, -1.0f},
+      {2, 1, 0, {-inf, 0.5f, false}, 1.0f / 3, -1.0f},
+      {3, -1, 0, {-inf, 0.0f, false}, 1.0f, -1.0f},
+      {3, 0, 0, {-inf, 0.5f, false}, 0.4f, -1.0f}};
   thrust::device_vector<float> data =
       std::vector<float>({1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f});
   DenseDatasetWrapper X(data.data().get(), 2, 3);
@@ -297,19 +296,20 @@ TEST(GPUTreeShap, BasicPathsInteractions) {
 // Test a tree with features occurring multiple times in a path
 TEST(GPUTreeShap, BasicPathsWithDuplicates) {
   const float inf = std::numeric_limits<float>::infinity();
-  std::vector<PathElement> path{{0, -1, 0, -inf, 0.0f, false, 1.0f, 3.0f},
-                                {0, 0, 0, 0.5f, inf, false, 2.0f / 3, 3.0f},
-                                {0, 0, 0, 1.5f, inf, false, 0.5f, 3.0f},
-                                {0, 0, 0, 2.5f, inf, false, 0.5f, 3.0f},
-                                {1, -1, 0, -inf, 0.0f, false, 1.0f, 2.0f},
-                                {1, 0, 0, 0.5f, inf, false, 2.0f / 3.0f, 2.0f},
-                                {1, 0, 0, 1.5f, inf, false, 0.5f, 2.0f},
-                                {1, 0, 0, -inf, 2.5f, false, 0.5f, 2.0f},
-                                {2, -1, 0, -inf, 0.0f, false, 1.0f, 1.0f},
-                                {2, 0, 0, 0.5f, inf, false, 2.0f / 3.0f, 1.0f},
-                                {2, 0, 0, -inf, 1.5f, false, 0.5f, 1.0f},
-                                {3, -1, 0, -inf, 0.0f, false, 1.0f, -1.0f},
-                                {3, 0, 0, -inf, 0.5f, false, 1.0f / 3, -1.0f}};
+  std::vector<PathElement<XgboostSplitCondition>> path{
+      {0, -1, 0, {-inf, 0.0f, false}, 1.0f, 3.0f},
+      {0, 0, 0, {0.5f, inf, false}, 2.0f / 3, 3.0f},
+      {0, 0, 0, {1.5f, inf, false}, 0.5f, 3.0f},
+      {0, 0, 0, {2.5f, inf, false}, 0.5f, 3.0f},
+      {1, -1, 0, {-inf, 0.0f, false}, 1.0f, 2.0f},
+      {1, 0, 0, {0.5f, inf, false}, 2.0f / 3.0f, 2.0f},
+      {1, 0, 0, {1.5f, inf, false}, 0.5f, 2.0f},
+      {1, 0, 0, {-inf, 2.5f, false}, 0.5f, 2.0f},
+      {2, -1, 0, {-inf, 0.0f, false}, 1.0f, 1.0f},
+      {2, 0, 0, {0.5f, inf, false}, 2.0f / 3.0f, 1.0f},
+      {2, 0, 0, {-inf, 1.5f, false}, 0.5f, 1.0f},
+      {3, -1, 0, {-inf, 0.0f, false}, 1.0f, -1.0f},
+      {3, 0, 0, {-inf, 0.5f, false}, 1.0f / 3, -1.0f}};
   thrust::device_vector<float> data = std::vector<float>({2.0f});
   DenseDatasetWrapper X(data.data().get(), 1, 1);
   size_t num_trees = 1;
@@ -336,9 +336,10 @@ class TestGroupPath : public detail::GroupPath {
   using detail::GroupPath::unique_depth_;
 };
 
-template <typename DatasetT>
-__global__ void TestExtendKernel(DatasetT X, size_t num_path_elements,
-                                 const PathElement* path_elements) {
+template <typename DatasetT, typename SplitConditionT>
+__global__ void TestExtendKernel(
+    DatasetT X, size_t num_path_elements,
+    const PathElement<SplitConditionT>* path_elements) {
   cooperative_groups::thread_block block =
       cooperative_groups::this_thread_block();
   auto group =
@@ -351,8 +352,9 @@ __global__ void TestExtendKernel(DatasetT X, size_t num_path_elements,
   // Test first training instance
   cooperative_groups::coalesced_group active_group =
       cooperative_groups::coalesced_threads();
-  PathElement e = path_elements[active_group.thread_rank()];
-  float one_fraction = detail::GetOneFraction(e, X, 0);
+  PathElement<SplitConditionT> e = path_elements[active_group.thread_rank()];
+  float one_fraction =
+      e.split_condition.EvaluateSplit(X.GetElement(0, e.feature_idx));
   float zero_fraction = e.zero_fraction;
   auto labelled_group = detail::active_labeled_partition(mask, 0);
   TestGroupPath path(labelled_group, zero_fraction, one_fraction);
@@ -405,7 +407,8 @@ __global__ void TestExtendKernel(DatasetT X, size_t num_path_elements,
   }
 
   // Test second training instance
-  one_fraction = detail::GetOneFraction(e, X, 1);
+  one_fraction =
+      e.split_condition.EvaluateSplit(X.GetElement(1, e.feature_idx));
   TestGroupPath path2(labelled_group, zero_fraction, one_fraction);
   path2.Extend();
   assert(path2.unique_depth_ == 1);
@@ -458,21 +461,21 @@ __global__ void TestExtendKernel(DatasetT X, size_t num_path_elements,
 
 TEST(GPUTreeShap, Extend) {
   const float inf = std::numeric_limits<float>::infinity();
-  std::vector<PathElement> path;
-  path.emplace_back(PathElement{0, -1, 0, -inf, 0.0f, false, 1.0f, 1.0f});
-  path.emplace_back(PathElement{0, 0, 0, 0.5f, inf, false, 3.0f / 5, 1.0f});
-  path.emplace_back(PathElement{0, 1, 0, 0.5f, inf, false, 2.0f / 3, 1.0f});
-  path.emplace_back(PathElement{0, 2, 0, -inf, 0.5f, false, 1.0f / 2, 1.0f});
-  thrust::device_vector<PathElement> device_path(path);
+  std::vector<PathElement<XgboostSplitCondition>> path{
+      {0, -1, 0, {-inf, 0.0f, false}, 1.0f, 1.0f},
+      {0, 0, 0, {0.5f, inf, false}, 3.0f / 5, 1.0f},
+      {0, 1, 0, {0.5f, inf, false}, 2.0f / 3, 1.0f},
+      {0, 2, 0, {-inf, 0.5f, false}, 1.0f / 2, 1.0f}};
+  thrust::device_vector<PathElement<XgboostSplitCondition>> device_path(path);
   thrust::device_vector<float> data =
       std::vector<float>({1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f});
   DenseDatasetWrapper X(data.data().get(), 2, 3);
   TestExtendKernel<<<1, 32>>>(X, 4, device_path.data().get());
 }
-template <typename DatasetT>
-__global__ void TestExtendMultipleKernel(DatasetT X, size_t n_first,
-                                         size_t n_second,
-                                         const PathElement* path_elements) {
+template <typename DatasetT, typename SplitConditionT>
+__global__ void TestExtendMultipleKernel(
+    DatasetT X, size_t n_first, size_t n_second,
+    const PathElement<SplitConditionT>* path_elements) {
   cooperative_groups::thread_block block =
       cooperative_groups::this_thread_block();
   auto warp =
@@ -485,10 +488,11 @@ __global__ void TestExtendMultipleKernel(DatasetT X, size_t n_first,
       cooperative_groups::coalesced_threads();
   int label = warp.thread_rank() >= n_first;
   auto labeled_group = detail::active_labeled_partition(mask, label);
-  PathElement e = path_elements[warp.thread_rank()];
+  PathElement<SplitConditionT> e = path_elements[warp.thread_rank()];
 
   // Test first training instance
-  float one_fraction = detail::GetOneFraction(e, X, 0);
+  float one_fraction =
+      e.split_condition.EvaluateSplit(X.GetElement(0, e.feature_idx));
   float zero_fraction = e.zero_fraction;
   TestGroupPath path(labeled_group, zero_fraction, one_fraction);
   assert(path.unique_depth_ == 0);
@@ -564,17 +568,17 @@ __global__ void TestExtendMultipleKernel(DatasetT X, size_t n_first,
 
 TEST(GPUTreeShap, ExtendMultiplePaths) {
   const float inf = std::numeric_limits<float>::infinity();
-  std::vector<PathElement> path;
-  path.emplace_back(PathElement{0, -1, 0, -inf, 0.0f, false, 1.0f, 1.0f});
-  path.emplace_back(PathElement{0, 0, 0, 0.5f, inf, false, 3.0f / 5, 1.0f});
-  path.emplace_back(PathElement{0, 1, 0, 0.5f, inf, false, 2.0f / 3, 1.0f});
-  path.emplace_back(PathElement{0, 2, 0, -inf, 0.5f, false, 1.0f / 2, 1.0f});
+  std::vector<PathElement<XgboostSplitCondition>> path{
+      {0, -1, 0, {-inf, 0.0f, false}, 1.0f, 1.0f},
+      {0, 0, 0, {0.5f, inf, false}, 3.0f / 5, 1.0f},
+      {0, 1, 0, {0.5f, inf, false}, 2.0f / 3, 1.0f},
+      {0, 2, 0, {-inf, 0.5f, false}, 1.0f / 2, 1.0f}};
   // Add the first three elements again
   path.emplace_back(path[0]);
   path.emplace_back(path[1]);
   path.emplace_back(path[2]);
 
-  thrust::device_vector<PathElement> device_path(path);
+  thrust::device_vector<PathElement<XgboostSplitCondition>> device_path(path);
   thrust::device_vector<float> data =
       std::vector<float>({1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f});
   DenseDatasetWrapper X(data.data().get(), 2, 3);
@@ -736,7 +740,7 @@ class DeterminismTest : public ::testing::Test {
                           num_groups);
   }
 
-  std::vector<PathElement> model;
+  std::vector<PathElement<XgboostSplitCondition>> model;
   TestDataset test_data;
   DenseDatasetWrapper X;
   size_t samples;
@@ -745,8 +749,8 @@ class DeterminismTest : public ::testing::Test {
 };
 
 TEST_F(DeterminismTest, GPUTreeShap) {
-  GPUTreeShap(X, model.begin(), model.end(), num_groups,
-              reference_phis.begin(), reference_phis.end());
+  GPUTreeShap(X, model.begin(), model.end(), num_groups, reference_phis.begin(),
+              reference_phis.end());
 
   for (auto i = 0ull; i < samples; i++) {
     thrust::device_vector<float> phis(reference_phis.size());
@@ -772,8 +776,7 @@ TEST_F(DeterminismTest, GPUTreeShapInteractions) {
 
 TEST_F(DeterminismTest, GPUTreeShapTaylorInteractions) {
   GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), num_groups,
-                                reference_phis.begin(),
-                                reference_phis.end());
+                                reference_phis.begin(), reference_phis.end());
 
   for (auto i = 0ull; i < samples; i++) {
     thrust::device_vector<float> phis(reference_phis.size());
@@ -790,17 +793,17 @@ TEST_F(DeterminismTest, GPUTreeShapTaylorInteractions) {
 TEST(GPUTreeShap, TaylorInteractionsPaperExample) {
   const float inf = std::numeric_limits<float>::infinity();
   float c = 3.0f;
-  std::vector<PathElement> path{
-      PathElement{0, -1, 0, -inf, inf, false, 1.0f, 1.0f},
-      {0, 0, 0, 0.5f, inf, false, 0.0f, 1.0f},
-      {1, -1, 0, -inf, inf, false, 1.0f, 1.0f},
-      {1, 1, 0, 0.5f, inf, false, 0.0f, 1.0f},
-      {2, -1, 0, -inf, inf, false, 1.0f, 1.0f},
-      {2, 2, 0, 0.5f, inf, false, 0.0f, 1.0f},
-      {3, -1, 0, -inf, inf, false, 1.0f, c},
-      {3, 0, 0, 0.5f, inf, false, 0.0f, c},
-      {3, 1, 0, 0.5f, inf, false, 0.0f, c},
-      {3, 2, 0, 0.5f, inf, false, 0.0f, c},
+  std::vector<PathElement<XgboostSplitCondition>> path{
+      {0, -1, 0, {-inf, inf, false}, 1.0f, 1.0f},
+      {0, 0, 0, {0.5f, inf, false}, 0.0f, 1.0f},
+      {1, -1, 0, {-inf, inf, false}, 1.0f, 1.0f},
+      {1, 1, 0, {0.5f, inf, false}, 0.0f, 1.0f},
+      {2, -1, 0, {-inf, inf, false}, 1.0f, 1.0f},
+      {2, 2, 0, {0.5f, inf, false}, 0.0f, 1.0f},
+      {3, -1, 0, {-inf, inf, false}, 1.0f, c},
+      {3, 0, 0, {0.5f, inf, false}, 0.0f, c},
+      {3, 1, 0, {0.5f, inf, false}, 0.0f, c},
+      {3, 2, 0, {0.5f, inf, false}, 0.0f, c},
   };
   thrust::device_vector<float> data = std::vector<float>({1.0f, 1.0f, 1.0f});
   DenseDatasetWrapper X(data.data().get(), 1, 3);
@@ -820,12 +823,12 @@ TEST(GPUTreeShap, TaylorInteractionsPaperExample) {
 
 TEST(GPUTreeShap, TaylorInteractionsBasic) {
   const float inf = std::numeric_limits<float>::infinity();
-  std::vector<PathElement> path{
-      PathElement{0, -1, 0, -inf, inf, false, 1.0f, 2.0f},
-      {0, 0, 0, 0.5f, inf, false, 0.25f, 2.0f},
-      {0, 1, 0, 0.5f, inf, false, 0.5f, 2.0f},
-      {0, 2, 0, 0.5f, inf, false, 0.6f, 2.0f},
-      {0, 3, 0, 0.5f, inf, false, 1.0f, 2.0f},
+  std::vector<PathElement<XgboostSplitCondition>> path{
+      {0, -1, 0, {-inf, inf, false}, 1.0f, 2.0f},
+      {0, 0, 0, {0.5f, inf, false}, 0.25f, 2.0f},
+      {0, 1, 0, {0.5f, inf, false}, 0.5f, 2.0f},
+      {0, 2, 0, {0.5f, inf, false}, 0.6f, 2.0f},
+      {0, 3, 0, {0.5f, inf, false}, 1.0f, 2.0f},
   };
   thrust::device_vector<float> data =
       std::vector<float>({1.0f, 1.0f, 1.0f, 1.0f});
