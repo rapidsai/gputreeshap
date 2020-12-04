@@ -1092,7 +1092,8 @@ void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
                  PhiIteratorT phis_end) {
   if (X.NumRows() == 0 || X.NumCols() == 0 || end - begin <= 0) return;
 
-  if (phis_end - phis_begin < X.NumRows() * (X.NumCols() + 1) * num_groups) {
+  if (size_t(phis_end - phis_begin) <
+      X.NumRows() * (X.NumCols() + 1) * num_groups) {
     throw std::invalid_argument(
         "phis_out must be at least of size X.NumRows() * (X.NumCols() + 1) * "
         "num_groups");
@@ -1168,7 +1169,7 @@ void GPUTreeShapInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
                              size_t num_groups, PhiIteratorT phis_begin,
                              PhiIteratorT phis_end) {
   if (X.NumRows() == 0 || X.NumCols() == 0 || end - begin <= 0) return;
-  if (phis_end - phis_begin <
+  if (size_t(phis_end - phis_begin) <
       X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) * num_groups) {
     throw std::invalid_argument(
         "phis_out must be at least of size X.NumRows() * (X.NumCols() + 1)  * "
@@ -1253,7 +1254,7 @@ void GPUTreeShapTaylorInteractions(DatasetT X, PathIteratorT begin,
 
   if (X.NumRows() == 0 || X.NumCols() == 0 || end - begin <= 0) return;
 
-  if (phis_end - phis_begin <
+  if (size_t(phis_end - phis_begin) <
       X.NumRows() * (X.NumCols() + 1) * (X.NumCols() + 1) * num_groups) {
     throw std::invalid_argument(
         "phis_out must be at least of size X.NumRows() * (X.NumCols() + 1)  * "

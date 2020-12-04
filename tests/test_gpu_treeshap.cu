@@ -194,8 +194,8 @@ class APITest : public ::testing::Test {
 TEST_F(APITest, PathTooLong) {
   model.resize(33);
   model[0] = {0, -1, 0, {0, 0, 0}, 0, 0};
-  for (int64_t i = 1; i < model.size(); i++) {
-    model[i] = {0, i, 0, {0, 0, 0}, 0, 0};
+  for (size_t i = 1; i < model.size(); i++) {
+    model[i] = {0, static_cast<int64_t>(i), 0, {0, 0, 0}, 0, 0};
   }
   ExpectAPIThrow<std::invalid_argument>("Tree depth must be <= 32");
 }
