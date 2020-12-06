@@ -61,6 +61,20 @@ BENCHMARK_REGISTER_F(Fixture, GPUTreeShap)
     ->Args({10000, 50, 10, 1000})
     ->Args({100000, 500, 20, 10000});
 
+BENCHMARK_DEFINE_F(Fixture, GPUTreeShapInterventional)
+(benchmark::State& st) {  // NOLINT
+  TestDataset R_test_data(1000, num_features, 1429);
+  DenseDatasetWrapper R = R_test_data.GetDeviceWrapper();
+  for (auto _ : st) {
+    GPUTreeShapInterventional(X, R, model.begin(), model.end(), num_groups,
+                              phis->begin(), phis->end());
+  }
+}
+BENCHMARK_REGISTER_F(Fixture, GPUTreeShapInterventional)
+    ->ArgNames({"n_rows", "n_feats", "max_depth", "n_leaves"})
+    ->Args({1000, 10, 6, 1000})
+    ->Args({10000, 50, 10, 1000});
+
 BENCHMARK_DEFINE_F(Fixture, GPUTreeShapInteractions)(benchmark::State& st) {// NOLINT
   phis.reset(new thrust::device_vector<float>(X.NumRows() * (X.NumCols() + 1) *
                                               (X.NumCols() + 1) * num_groups));
