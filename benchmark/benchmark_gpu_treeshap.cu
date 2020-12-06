@@ -40,7 +40,7 @@ class Fixture : public benchmark::Fixture {
     phis.reset();
     test_data.reset();
   }
-  std::vector<PathElement> model;
+  std::vector<PathElement<XgboostSplitCondition>> model;
   std::unique_ptr<TestDataset> test_data;
   DenseDatasetWrapper X;
   std::unique_ptr<thrust::device_vector<float>> phis;
@@ -51,8 +51,8 @@ class Fixture : public benchmark::Fixture {
 
 BENCHMARK_DEFINE_F(Fixture, GPUTreeShap)(benchmark::State& st) { // NOLINT
   for (auto _ : st) {
-    GPUTreeShap(X, model.begin(), model.end(), num_groups, phis->data().get(),
-                phis->size());
+    GPUTreeShap(X, model.begin(), model.end(), num_groups, phis->begin(),
+                phis->end());
   }
 }
 BENCHMARK_REGISTER_F(Fixture, GPUTreeShap)
@@ -66,7 +66,7 @@ BENCHMARK_DEFINE_F(Fixture, GPUTreeShapInteractions)(benchmark::State& st) {// N
                                               (X.NumCols() + 1) * num_groups));
   for (auto _ : st) {
     GPUTreeShapInteractions(X, model.begin(), model.end(), num_groups,
-                            phis->data().get(), phis->size());
+                            phis->begin(), phis->end());
   }
 }
 
@@ -82,7 +82,7 @@ BENCHMARK_DEFINE_F(Fixture, GPUTreeShapTaylorInteractions)
                                               (X.NumCols() + 1) * num_groups));
   for (auto _ : st) {
     GPUTreeShapTaylorInteractions(X, model.begin(), model.end(), num_groups,
-                                  phis->data().get(), phis->size());
+                                  phis->begin(), phis->end());
   }
 }
 
