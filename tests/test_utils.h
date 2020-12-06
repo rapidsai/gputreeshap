@@ -16,11 +16,11 @@
 #pragma once
 #include <GPUTreeShap/gpu_treeshap.h>
 #include <limits>
+#include <numeric>
 #include <random>
 #include <vector>
-#include <numeric>
 
-using PathElement = gpu_treeshap::PathElement;
+namespace gpu_treeshap {
 
 class DenseDatasetWrapper {
   const float* data;
@@ -32,6 +32,7 @@ class DenseDatasetWrapper {
   DenseDatasetWrapper(const float* data, int num_rows, int num_cols)
       : data(data), num_rows(num_rows), num_cols(num_cols) {}
   __device__ float GetElement(size_t row_idx, size_t col_idx) const {
+    assert(col_idx >= 0);
     return data[row_idx * num_cols + col_idx];
   }
   __host__ __device__ size_t NumRows() const { return num_rows; }
@@ -62,9 +63,10 @@ class TestDataset {
   }
 };
 
-void GenerateModel(std::vector<PathElement>* model, int group, size_t max_depth,
-                   size_t num_features, size_t num_paths, std::mt19937* gen,
-                   float max_v) {
+template <typename SplitConditionT>
+void GenerateModel(std::vector<PathElement<SplitConditionT>>* model, int group,
+                   size_t max_depth, size_t num_features, size_t num_paths,
+                   std::mt19937* gen, float max_v) {
   std::uniform_real_distribution<float> value_dis(-max_v, max_v);
   std::uniform_int_distribution<int64_t> feature_dis(0, num_features - 1);
   std::bernoulli_distribution bern_dis;
@@ -73,8 +75,8 @@ void GenerateModel(std::vector<PathElement>* model, int group, size_t max_depth,
   float z = std::pow(0.5, 1.0 / max_depth);
   for (auto i = 0ull; i < num_paths; i++) {
     float v = value_dis(*gen);
-    model->emplace_back(
-        PathElement{base_path_idx + i, -1, group, -inf, inf, false, 1.0, v});
+    model->emplace_back(PathElement<SplitConditionT>{
+        base_path_idx + i, -1, group, {-inf, inf, false}, 1.0, v});
     for (auto j = 0ull; j < max_depth; j++) {
       float lower_bound = -inf;
       float upper_bound = inf;
@@ -89,20 +91,22 @@ void GenerateModel(std::vector<PathElement>* model, int group, size_t max_depth,
       }
       // Don't make the zero fraction too small
       std::uniform_real_distribution<float> zero_fraction_dis(0.05, 1.0);
-      model->emplace_back(
-          PathElement{base_path_idx + i, feature_dis(*gen), group, lower_bound,
-                      upper_bound, bern_dis(*gen), zero_fraction_dis(*gen), v});
+      model->emplace_back(PathElement<SplitConditionT>{
+          base_path_idx + i,
+          feature_dis(*gen),
+          group,
+          {lower_bound, upper_bound, bern_dis(*gen)},
+          zero_fraction_dis(*gen),
+          v});
     }
   }
 }
 
-std::vector<PathElement> GenerateEnsembleModel(size_t num_groups,
-                                               size_t max_depth,
-                                               size_t num_features,
-                                               size_t num_paths, size_t seed,
-                                               float max_v = 1.0f) {
+std::vector<PathElement<gpu_treeshap::XgboostSplitCondition>>
+GenerateEnsembleModel(size_t num_groups, size_t max_depth, size_t num_features,
+                      size_t num_paths, size_t seed, float max_v = 1.0f) {
   std::mt19937 gen(seed);
-  std::vector<PathElement> model;
+  std::vector<PathElement<gpu_treeshap::XgboostSplitCondition>> model;
   for (auto group = 0llu; group < num_groups; group++) {
     GenerateModel(&model, group, max_depth, num_features, num_paths, &gen,
                   max_v);
@@ -110,8 +114,9 @@ std::vector<PathElement> GenerateEnsembleModel(size_t num_groups,
   return model;
 }
 
-std::vector<float> Predict(const std::vector<PathElement>& model,
-                           const TestDataset& X, size_t num_groups) {
+std::vector<float> Predict(
+    const std::vector<PathElement<gpu_treeshap::XgboostSplitCondition>>& model,
+    const TestDataset& X, size_t num_groups) {
   std::vector<float> predictions(X.num_rows * num_groups);
   for (auto i = 0ull; i < X.num_rows; i++) {
     const float* row = X.host_data.data() + i * X.num_cols;
@@ -133,9 +138,9 @@ std::vector<float> Predict(const std::vector<PathElement>& model,
       if (e.feature_idx != -1) {
         float fval = row[e.feature_idx];
         if (std::isnan(fval)) {
-          valid = valid && e.is_missing_branch;
-        } else if (fval < e.feature_lower_bound ||
-                   fval >= e.feature_upper_bound) {
+          valid = valid && e.split_condition.is_missing_branch;
+        } else if (fval < e.split_condition.feature_lower_bound ||
+                   fval >= e.split_condition.feature_upper_bound) {
           valid = false;
         }
       }
@@ -147,3 +152,4 @@ std::vector<float> Predict(const std::vector<PathElement>& model,
 
   return predictions;
 }
+}  // namespace gpu_treeshap
