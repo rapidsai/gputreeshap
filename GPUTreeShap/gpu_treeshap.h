@@ -47,6 +47,7 @@ struct XgboostSplitCondition {
 
   // Does this instance flow down this path?
   __host__ __device__ bool EvaluateSplit(float x) const {
+    // is nan
     if (isnan(x)) {
       return is_missing_branch;
     }
@@ -712,10 +713,10 @@ inline __host__ __device__ int64_t Factorial(int64_t x) {
   return y;
 }
 
-inline __host__ __device__ double W(int s, int n) {
+// Compute factorials in log space using lgamma to avoid overflow
+inline __host__ __device__ double W(double s, double n) {
   assert(n - s - 1 >= 0);
-  return static_cast<double>(Factorial(s) * Factorial(n - s - 1)) /
-         Factorial(n);
+  return exp(lgamma(s + 1) - lgamma(n + 1) + lgamma(n - s));
 }
 
 template <typename DatasetT, size_t kBlockSize, size_t kRowsPerWarp,
@@ -725,60 +726,68 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
                              const PathElement<SplitConditionT>* path_elements,
                              const size_t* bin_segments, size_t num_groups,
                              double* phis) {
-  // Use shared memory for structs, otherwise nvcc puts in local memory
-  __shared__ DatasetT s_X;
-  s_X = X;
+  // Cache W coefficients
+  __shared__ float s_W[33][33];
+  for (int i = threadIdx.x; i < 33 * 33; i += kBlockSize) {
+    auto s = i % 33;
+    auto n = i / 33;
+    if (n - s - 1 >= 0) {
+      s_W[s][n] = W(s, n);
+    } else {
+      s_W[s][n] = 0.0;
+    }
+  }
+
   __shared__ PathElement<SplitConditionT> s_elements[kBlockSize];
   PathElement<SplitConditionT>& e = s_elements[threadIdx.x];
 
   size_t start_row, end_row;
   bool thread_active;
   ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(
-      s_X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, &e,
+      X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, &e,
       &thread_active);
 
-  // Don't need the root for this algorithm, return that thread
   uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
   if (!thread_active) return;
 
   auto labelled_group = active_labeled_partition(mask, e.path_idx);
 
   for (int64_t x_idx = start_row; x_idx < end_row; x_idx++) {
-    double result = 0.0;
+    float result = 0.0f;
+    bool x_cond = e.EvaluateSplit(X, x_idx);
+    uint32_t x_ballot = labelled_group.ballot(x_cond);
     for (int64_t r_idx = 0; r_idx < R.NumRows(); r_idx++) {
-      bool x_cond = e.EvaluateSplit(X, x_idx);
       bool r_cond = e.EvaluateSplit(R, r_idx);
+      uint32_t r_ballot = labelled_group.ballot(r_cond);
       assert(!e.IsRoot() ||
              (x_cond == r_cond));  // These should be the same for the root
-
-      // If neither foreground or background go down this path, go to next
-      // sample
-      uint32_t early_exit = labelled_group.ballot(!x_cond && !r_cond);
-      if (early_exit) {
-        continue;
-      }
-      uint32_t s = __popc(labelled_group.ballot(x_cond && !r_cond));
-      uint32_t n = __popc(labelled_group.ballot(x_cond != r_cond));
+      uint32_t s = __popc(x_ballot & ~r_ballot);
+      uint32_t n = __popc(x_ballot ^ r_ballot);
+      float tmp = 0.0f;
       // Theorem 1
       if (x_cond && !r_cond) {
-        result += W(s - 1, n) * e.v;
-      } else if (x_cond != r_cond) {
-        result -= W(s, n) * e.v;
+        tmp += s_W[s - 1][n];
       }
+      tmp -= s_W[s][n] * (r_cond && !x_cond);
 
       // No foreground samples make it to this leaf, increment bias
       if (e.IsRoot() && s == 0) {
-        result += e.v;
+        tmp += 1.0f;
       }
+      // If neither foreground or background go down this path, ignore this path
+      bool reached_leaf = !labelled_group.ballot(!x_cond && !r_cond);
+      tmp *= reached_leaf;
+      result += tmp;
     }
 
     if (result != 0.0) {
       result /= R.NumRows();
+
       // Root writes bias
       auto feature = e.IsRoot() ? X.NumCols() : e.feature_idx;
       atomicAddDouble(
           &phis[IndexPhi(x_idx, num_groups, e.group, X.NumCols(), feature)],
-          result);
+          result * e.v);
     }
   }
 }
@@ -794,7 +803,7 @@ void ComputeShapInterventional(
   size_t bins_per_row = bin_segments.size() - 1;
   const int kBlockThreads = GPUTREESHAP_MAX_THREADS_PER_BLOCK;
   const int warps_per_block = kBlockThreads / 32;
-  const int kRowsPerWarp = 1;
+  const int kRowsPerWarp = 100;
   size_t warps_needed = bins_per_row * DivRoundUp(X.NumRows(), kRowsPerWarp);
 
   const uint32_t grid_size = DivRoundUp(warps_needed, warps_per_block);
