@@ -47,6 +47,7 @@ struct XgboostSplitCondition {
 
   // Does this instance flow down this path?
   __host__ __device__ bool EvaluateSplit(float x) const {
+    // is nan
     if (isnan(x)) {
       return is_missing_branch;
     }
@@ -87,6 +88,15 @@ struct PathElement {
 
   PathElement() = default;
   __host__ __device__ bool IsRoot() const { return feature_idx == -1; }
+
+  template <typename DatasetT>
+  __host__ __device__ bool EvaluateSplit(DatasetT X, size_t row_idx) const {
+    if (this->IsRoot()) {
+      return 1.0;
+    }
+    return split_condition.EvaluateSplit(X.GetElement(row_idx, feature_idx));
+  }
+
   /*! Unique path index. */
   size_t path_idx;
   /*! Feature of this split, -1 indicates bias term. */
@@ -373,7 +383,7 @@ __device__ float ComputePhi(const PathElement<SplitConditionT>& e,
                             size_t row_idx, const DatasetT& X,
                             const ContiguousGroup& group, float zero_fraction) {
   float one_fraction =
-      e.split_condition.EvaluateSplit(X.GetElement(row_idx, e.feature_idx));
+      e.EvaluateSplit(X, row_idx);
   GroupPath path(group, zero_fraction, one_fraction);
   size_t unique_path_length = group.size();
 
@@ -486,8 +496,7 @@ __device__ float ComputePhiCondition(const PathElement<SplitConditionT>& e,
                                      size_t row_idx, const DatasetT& X,
                                      const ContiguousGroup& group,
                                      int64_t condition_feature) {
-  float one_fraction =
-      e.split_condition.EvaluateSplit(X.GetElement(row_idx, e.feature_idx));
+  float one_fraction = e.EvaluateSplit(X, row_idx);
   PathT path(group, e.zero_fraction, one_fraction);
   size_t unique_path_length = group.size();
   float condition_on_fraction = 1.0f;
@@ -692,6 +701,116 @@ void ComputeShapTaylorInteractions(
   ShapTaylorInteractionsKernel<DatasetT, kBlockThreads, kRowsPerWarp>
       <<<grid_size, kBlockThreads>>>(
           X, bins_per_row, path_elements.data().get(),
+          bin_segments.data().get(), num_groups, phis);
+}
+
+
+inline __host__ __device__ int64_t Factorial(int64_t x) {
+  int64_t y = 1;
+  for (auto i = 2; i <= x; i++) {
+    y *= i;
+  }
+  return y;
+}
+
+// Compute factorials in log space using lgamma to avoid overflow
+inline __host__ __device__ double W(double s, double n) {
+  assert(n - s - 1 >= 0);
+  return exp(lgamma(s + 1) - lgamma(n + 1) + lgamma(n - s));
+}
+
+template <typename DatasetT, size_t kBlockSize, size_t kRowsPerWarp,
+          typename SplitConditionT>
+__global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
+    ShapInterventionalKernel(DatasetT X, DatasetT R, size_t bins_per_row,
+                             const PathElement<SplitConditionT>* path_elements,
+                             const size_t* bin_segments, size_t num_groups,
+                             double* phis) {
+  // Cache W coefficients
+  __shared__ float s_W[33][33];
+  for (int i = threadIdx.x; i < 33 * 33; i += kBlockSize) {
+    auto s = i % 33;
+    auto n = i / 33;
+    if (n - s - 1 >= 0) {
+      s_W[s][n] = W(s, n);
+    } else {
+      s_W[s][n] = 0.0;
+    }
+  }
+
+  __shared__ PathElement<SplitConditionT> s_elements[kBlockSize];
+  PathElement<SplitConditionT>& e = s_elements[threadIdx.x];
+
+  size_t start_row, end_row;
+  bool thread_active;
+  ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(
+      X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, &e,
+      &thread_active);
+
+  uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
+  if (!thread_active) return;
+
+  auto labelled_group = active_labeled_partition(mask, e.path_idx);
+
+  for (int64_t x_idx = start_row; x_idx < end_row; x_idx++) {
+    float result = 0.0f;
+    bool x_cond = e.EvaluateSplit(X, x_idx);
+    uint32_t x_ballot = labelled_group.ballot(x_cond);
+    for (int64_t r_idx = 0; r_idx < R.NumRows(); r_idx++) {
+      bool r_cond = e.EvaluateSplit(R, r_idx);
+      uint32_t r_ballot = labelled_group.ballot(r_cond);
+      assert(!e.IsRoot() ||
+             (x_cond == r_cond));  // These should be the same for the root
+      uint32_t s = __popc(x_ballot & ~r_ballot);
+      uint32_t n = __popc(x_ballot ^ r_ballot);
+      float tmp = 0.0f;
+      // Theorem 1
+      if (x_cond && !r_cond) {
+        tmp += s_W[s - 1][n];
+      }
+      tmp -= s_W[s][n] * (r_cond && !x_cond);
+
+      // No foreground samples make it to this leaf, increment bias
+      if (e.IsRoot() && s == 0) {
+        tmp += 1.0f;
+      }
+      // If neither foreground or background go down this path, ignore this path
+      bool reached_leaf = !labelled_group.ballot(!x_cond && !r_cond);
+      tmp *= reached_leaf;
+      result += tmp;
+    }
+
+    if (result != 0.0) {
+      result /= R.NumRows();
+
+      // Root writes bias
+      auto feature = e.IsRoot() ? X.NumCols() : e.feature_idx;
+      atomicAddDouble(
+          &phis[IndexPhi(x_idx, num_groups, e.group, X.NumCols(), feature)],
+          result * e.v);
+    }
+  }
+}
+
+template <typename DatasetT, typename SizeTAllocatorT, typename PathAllocatorT,
+          typename SplitConditionT>
+void ComputeShapInterventional(
+    DatasetT X, DatasetT R,
+    const thrust::device_vector<size_t, SizeTAllocatorT>& bin_segments,
+    const thrust::device_vector<PathElement<SplitConditionT>, PathAllocatorT>&
+        path_elements,
+    size_t num_groups, double* phis) {
+  size_t bins_per_row = bin_segments.size() - 1;
+  const int kBlockThreads = GPUTREESHAP_MAX_THREADS_PER_BLOCK;
+  const int warps_per_block = kBlockThreads / 32;
+  const int kRowsPerWarp = 100;
+  size_t warps_needed = bins_per_row * DivRoundUp(X.NumRows(), kRowsPerWarp);
+
+  const uint32_t grid_size = DivRoundUp(warps_needed, warps_per_block);
+
+  ShapInterventionalKernel<DatasetT, kBlockThreads, kRowsPerWarp>
+      <<<grid_size, kBlockThreads>>>(
+          X, R, bins_per_row, path_elements.data().get(),
           bin_segments.data().get(), num_groups, phis);
 }
 
@@ -1136,32 +1255,38 @@ void GPUTreeShap(DatasetT X, PathIteratorT begin, PathIteratorT end,
 
 /*!
  * Compute feature interaction contributions on the GPU given a set of unique
- * paths through a tree ensemble and a dataset. Uses device memory proportional
- * to the tree ensemble size.
+ * paths through a tree ensemble and a dataset. Uses device memory
+ * proportional to the tree ensemble size.
  *
  * \exception std::invalid_argument Thrown when an invalid argument error
- * condition occurs. \tparam  PhiIteratorT      Thrust type iterator, may be
- * thrust::device_ptr for device memory, or stl iterator/raw pointer for host
- * memory. Value type must be floating point. \tparam  PathIteratorT     Thrust
- * type iterator, may be thrust::device_ptr for device memory, or stl
- * iterator/raw pointer for host memory. \tparam  DatasetT User-specified
- * dataset container. \tparam  DeviceAllocatorT  Optional thrust style
- * allocator.
+ *                                  condition occurs.
+ * \tparam  DeviceAllocatorT  Optional thrust style allocator.
+ * \tparam  DatasetT          User-specified dataset container.
+ * \tparam  PathIteratorT     Thrust type iterator, may be thrust::device_ptr
+ *                            for device memory, or stl iterator/raw pointer for
+ *                            host memory.
+ * \tparam  PhiIteratorT      Thrust type iterator, may be thrust::device_ptr
+ *                            for device memory, or stl iterator/raw pointer for
+ *                            host memory. Value type must be floating point.
  *
  * \param X           Thin wrapper over a dataset allocated in device memory. X
- * should be trivially copyable as a kernel parameter (i.e. contain only
- * pointers to actual data) and must implement the methods
- * NumRows()/NumCols()/GetElement(size_t row_idx, size_t col_idx) as __device__
- * functions. GetElement may return NaN where the feature value is missing.
+ *                    should be trivially copyable as a kernel parameter (i.e.
+ *                    contain only pointers to actual data) and must implement
+ *                    the methods NumRows()/NumCols()/GetElement(size_t row_idx,
+ *                    size_t col_idx) as __device__ functions. GetElement may
+ *                    return NaN where the feature value is missing.
  * \param begin       Iterator to paths, where separate paths are delineated by
  *                    PathElement.path_idx. Each unique path should contain 1
- * root with feature_idx = -1 and zero_fraction = 1.0. The ordering of path
- * elements inside a unique path does not matter - the result will be the same.
- * Paths may contain duplicate features. See the PathElement class for more
- * information. \param end         Path end iterator. \param num_groups  Number
- * of output groups. In multiclass classification the algorithm outputs feature
- * contributions per output class. \param phis_begin  Begin iterator for output
- * phis. \param phis_end    End iterator for output phis.
+ *                    root with feature_idx = -1 and zero_fraction = 1.0. The
+ *                    ordering of path elements inside a unique path does not
+ *                    matter - the result will be the same. Paths may contain
+ *                    duplicate features. See the PathElement class for more
+ *                    information.
+ * \param end         Path end iterator.
+ * \param num_groups  Number of output groups. In multiclass classification the
+ *                    algorithm outputs feature contributions per output class.
+ * \param phis_begin  Begin iterator for output phis.
+ * \param phis_end    End iterator for output phis.
  */
 template <typename DeviceAllocatorT = thrust::device_allocator<int>,
           typename DatasetT, typename PathIteratorT, typename PhiIteratorT>
@@ -1219,28 +1344,34 @@ void GPUTreeShapInteractions(DatasetT X, PathIteratorT begin, PathIteratorT end,
  * Uses device memory proportional to the tree ensemble size.
  *
  * \exception std::invalid_argument Thrown when an invalid argument error
- * condition occurs. \tparam  DeviceAllocatorT  Optional thrust style allocator.
- * \tparam  DatasetT      User-specified dataset container.
- * \tparam  PathIteratorT Thrust type iterator, may be thrust::device_ptr for
- * device memory, or stl iterator/raw pointer for host memory. \tparam
- * PhiIteratorT Thrust type iterator, may be thrust::device_ptr for device
- * memory, or stl iterator/raw pointer for host memory. Value type must be
- * floating point.
+ *                                  condition occurs.
+ * \tparam  PhiIteratorT      Thrust type iterator, may be thrust::device_ptr
+ *                            for device memory, or stl iterator/raw pointer for
+ *                            host memory. Value type must be floating point.
+ * \tparam  PathIteratorT     Thrust type iterator, may be thrust::device_ptr
+ *                            for device memory, or stl iterator/raw pointer for
+ *                            host memory.
+ * \tparam  DatasetT          User-specified dataset container.
+ * \tparam  DeviceAllocatorT  Optional thrust style allocator.
  *
  * \param X           Thin wrapper over a dataset allocated in device memory. X
- * should be trivially copyable as a kernel parameter (i.e. contain only
- * pointers to actual data) and must implement the methods
- * NumRows()/NumCols()/GetElement(size_t row_idx, size_t col_idx) as __device__
- * functions. GetElement may return NaN where the feature value is missing.
+ *                    should be trivially copyable as a kernel parameter (i.e.
+ *                    contain only pointers to actual data) and must implement
+ *                    the methods NumRows()/NumCols()/GetElement(size_t row_idx,
+ *                    size_t col_idx) as __device__ functions. GetElement may
+ *                    return NaN where the feature value is missing.
  * \param begin       Iterator to paths, where separate paths are delineated by
  *                    PathElement.path_idx. Each unique path should contain 1
- * root with feature_idx = -1 and zero_fraction = 1.0. The ordering of path
- * elements inside a unique path does not matter - the result will be the same.
- * Paths may contain duplicate features. See the PathElement class for more
- * information. \param end         Path end iterator. \param num_groups  Number
- * of output groups. In multiclass classification the algorithm outputs feature
- * contributions per output class. \param phis_begin  Begin iterator for output
- * phis. \param phis_end    End iterator for output phis.
+ *                    root with feature_idx = -1 and zero_fraction = 1.0. The
+ *                    ordering of path elements inside a unique path does not
+ *                    matter - the result will be the same. Paths may contain
+ *                    duplicate features. See the PathElement class for more
+ *                    information.
+ * \param end         Path end iterator.
+ * \param num_groups  Number of output groups. In multiclass classification the
+ *                    algorithm outputs feature contributions per output class.
+ * \param phis_begin  Begin iterator for output phis.
+ * \param phis_end    End iterator for output phis.
  */
 template <typename DeviceAllocatorT = thrust::device_allocator<int>,
           typename DatasetT, typename PathIteratorT, typename PhiIteratorT>
@@ -1296,6 +1427,72 @@ void GPUTreeShapTaylorInteractions(DatasetT X, PathIteratorT begin,
   detail::ComputeShapTaylorInteractions(X, device_bin_segments,
                                         deduplicated_paths, num_groups,
                                         temp_phi.data().get());
+  thrust::copy(temp_phi.begin(), temp_phi.end(), phis_begin);
+}
+
+/*!
+ * Compute feature contributions on the GPU given a set of unique paths through a tree ensemble
+ * and a dataset. Uses device memory proportional to the tree ensemble size. This variant
+ * implements the interventional tree shap algorithm described here:
+ * https://drafts.distill.pub/HughChen/its_blog/
+ * 
+ * It requires a background dataset R.
+ *
+ * \exception std::invalid_argument Thrown when an invalid argument error condition occurs.
+ * \tparam  DeviceAllocatorT  Optional thrust style allocator.
+ * \tparam  DatasetT          User-specified dataset container.
+ * \tparam  PathIteratorT     Thrust type iterator, may be thrust::device_ptr for device memory, or
+ *                            stl iterator/raw pointer for host memory.
+ *
+ * \param X           Thin wrapper over a dataset allocated in device memory. X should be trivially
+ *                    copyable as a kernel parameter (i.e. contain only pointers to actual data) and
+ *                    must implement the methods NumRows()/NumCols()/GetElement(size_t row_idx,
+ *                    size_t col_idx) as __device__ functions. GetElement may return NaN where the
+ *                    feature value is missing.
+ * \param R           Background dataset.
+ * \param begin       Iterator to paths, where separate paths are delineated by
+ *                    PathElement.path_idx. Each unique path should contain 1 root with feature_idx =
+ *                    -1 and zero_fraction = 1.0. The ordering of path elements inside a unique path
+ *                    does not matter - the result will be the same. Paths may contain duplicate
+ *                    features. See the PathElement class for more information.
+ * \param end         Path end iterator.
+ * \param num_groups  Number of output groups. In multiclass classification the algorithm outputs
+ *                    feature contributions per output class.
+ * \param phis_begin  Begin iterator for output phis.
+ * \param phis_end    End iterator for output phis.
+ */
+template <typename DeviceAllocatorT = thrust::device_allocator<int>,
+          typename DatasetT, typename PathIteratorT, typename PhiIteratorT>
+void GPUTreeShapInterventional(DatasetT X, DatasetT R, PathIteratorT begin,
+                               PathIteratorT end, size_t num_groups,
+                               PhiIteratorT phis_begin, PhiIteratorT phis_end) {
+  if (X.NumRows() == 0 || X.NumCols() == 0 || end - begin <= 0) return;
+
+  if (size_t(phis_end - phis_begin) <
+      X.NumRows() * (X.NumCols() + 1) * num_groups) {
+    throw std::invalid_argument(
+        "phis_out must be at least of size X.NumRows() * (X.NumCols() + 1) * "
+        "num_groups");
+  }
+
+  using size_vector = detail::RebindVector<size_t, DeviceAllocatorT>;
+  using double_vector = detail::RebindVector<double, DeviceAllocatorT>;
+  using path_vector = detail::RebindVector<
+      typename std::iterator_traits<PathIteratorT>::value_type,
+      DeviceAllocatorT>;
+  using split_condition =
+      typename std::iterator_traits<PathIteratorT>::value_type::split_type;
+
+  double_vector temp_phi(phis_end - phis_begin, 0.0);
+  path_vector device_paths(begin, end);
+
+  path_vector deduplicated_paths;
+  size_vector device_bin_segments;
+  detail::PreprocessPaths<DeviceAllocatorT, split_condition>(
+      &device_paths, &deduplicated_paths, &device_bin_segments);
+  detail::ComputeShapInterventional(X, R, device_bin_segments,
+                                    deduplicated_paths, num_groups,
+                                    temp_phi.data().get());
   thrust::copy(temp_phi.begin(), temp_phi.end(), phis_begin);
 }
 }  // namespace gpu_treeshap

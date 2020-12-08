@@ -22,6 +22,7 @@
 #include <vector>
 #include "gtest/gtest.h"
 #include "tests/test_utils.h"
+#include "../GPUTreeShap/gpu_treeshap.h"
 
 using namespace gpu_treeshap;  // NOLINT
 
@@ -118,6 +119,27 @@ TEST_P(ParameterisedModelTest, ShapTaylorInteractionsSum) {
     }
   }
 
+  for (auto i = 0ull; i < sum.size(); i++) {
+    ASSERT_NEAR(sum[i], margin[i], 1e-3);
+  }
+}
+
+TEST_P(ParameterisedModelTest, ShapSumInterventional) {
+  auto r_test_data = TestDataset(400, num_features, 10);
+  auto R = r_test_data.GetDeviceWrapper();
+  GPUTreeShapInterventional(X, R, model.begin(), model.end(), num_groups,
+                            phis.begin(), phis.end());
+  thrust::host_vector<float> result(phis);
+  std::vector<float> tmp(result.begin(), result.end());
+  std::vector<float> sum(num_rows * num_groups);
+  for (auto i = 0ull; i < num_rows; i++) {
+    for (auto j = 0ull; j < num_features + 1; j++) {
+      for (auto group = 0ull; group < num_groups; group++) {
+        size_t result_index = IndexPhi(i, num_groups, group, num_features, j);
+        sum[i * num_groups + group] += result[result_index];
+      }
+    }
+  }
   for (auto i = 0ull; i < sum.size(); i++) {
     ASSERT_NEAR(sum[i], margin[i], 1e-3);
   }
@@ -844,4 +866,51 @@ TEST(GPUTreeShap, TaylorInteractionsBasic) {
       std::accumulate(interaction_phis.begin(), interaction_phis.end(), 0.0f);
 
   ASSERT_FLOAT_EQ(sum, 2.0f);
+}
+
+
+TEST(GPUTreeShap, GetWCoefficients) {
+  EXPECT_DOUBLE_EQ(detail::W(0, 1), 1.0);
+  EXPECT_DOUBLE_EQ(detail::W(0, 2), 0.5);
+  EXPECT_DOUBLE_EQ(detail::W(1, 2), 0.5);
+  EXPECT_DOUBLE_EQ(detail::W(0, 3), 2.0 / 6);
+  EXPECT_DOUBLE_EQ(detail::W(1, 3), 1.0 / 6);
+  EXPECT_DOUBLE_EQ(detail::W(2, 3), 2.0 / 6);
+  EXPECT_DOUBLE_EQ(detail::W(0, 4), 6.0 / 24);
+  EXPECT_DOUBLE_EQ(detail::W(1, 4), 2.0 / 24);
+  EXPECT_DOUBLE_EQ(detail::W(2, 4), 2.0 / 24);
+  EXPECT_DOUBLE_EQ(detail::W(3, 4), 6.0 / 24);
+}
+
+TEST(GPUTreeShap, InterventionalBasic) {
+  const float inf = std::numeric_limits<float>::infinity();
+  std::vector<PathElement<XgboostSplitCondition>> path{
+      {0, -1, 0, {-inf, inf, false}, 1.0f, 8.0f},
+      {0, 0, 0, {5.0f, inf, false}, 0.0f, 8.0f},
+      {0, 1, 0, {5.0f, inf, false}, 0.0f, 8.0f},
+      {0, 0, 0, {5.0f, inf, false}, 0.0f, 8.0f},
+      {1, -1, 0, {-inf, inf, false}, 1.0f, 6.0f},
+      {1, 0, 0, {5.0f, inf, false}, 0.0f, 6.0f},
+      {1, 1, 0, {-inf, 5.0f, false}, 0.0f, 6.0f},
+      {1, 2, 0, {-5.0f, inf, false}, 0.0f, 6.0f},
+      {2, -1, 0, {-inf, inf, false}, 1.0f, 5.0f},
+      {2, 0, 0, {5.0f, inf, false}, 0.0f, 5.0f},
+      {2, 1, 0, {-inf, 5.0f, false}, 0.0f, 5.0f},
+      {2, 2, 0, {-inf, -5.0f, false}, 0.0f, 5.0f},
+  };
+  thrust::device_vector<float> X_data =
+      std::vector<float>({10.0f, 0.0f, 10.0f});
+  thrust::device_vector<float> R_data =
+      std::vector<float>({10.0f, 10.0f, -10.0f, 10.0f, 10.0f, 10.0f});
+  DenseDatasetWrapper X(X_data.data().get(), 1, 3);
+  DenseDatasetWrapper R(R_data.data().get(), 2, 3);
+  thrust::device_vector<float> phis(X.NumRows() * (X.NumCols() + 1));
+  GPUTreeShapInterventional(X, R, path.begin(), path.end(), 1,
+                            phis.begin(), phis.end());
+
+  std::vector<float> result(phis.begin(), phis.end());
+  ASSERT_FLOAT_EQ(result[0], 0.0f);
+  ASSERT_FLOAT_EQ(result[1], -2.25f);
+  ASSERT_FLOAT_EQ(result[2], 0.25f);
+  ASSERT_FLOAT_EQ(result[3], 8.0f);
 }
