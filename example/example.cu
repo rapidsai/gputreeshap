@@ -64,7 +64,7 @@ void RecursivePrint(std::ostream& os, const DecisionTree& dt, int node_idx,
   if (node_idx == -1) return;
   DecisionTree::Node node = dt.nodes[node_idx];
 
-  for (auto i = 0ull; i < depth; i++) {
+  for (int i = 0; i < depth; i++) {
     os << "\t";
   }
   os << node_idx << ":";
@@ -84,17 +84,44 @@ std::ostream& operator<<(std::ostream& os, const DecisionTree& dt) {
   return os;
 }
 
-std::vector<gpu_treeshap::PathElement> ExtractPaths(const DecisionTree& dt) {
-  std::vector<gpu_treeshap::PathElement> paths;
+// Define a custom split condition implementing EvaluateSplit and Merge
+struct MySplitCondition {
+  MySplitCondition() = default;
+  MySplitCondition(float feature_lower_bound, float feature_upper_bound)
+      : feature_lower_bound(feature_lower_bound),
+        feature_upper_bound(feature_upper_bound) {
+    assert(feature_lower_bound <= feature_upper_bound);
+  }
+
+  /*! Feature values >= lower and < upper flow down this path. */
+  float feature_lower_bound;
+  float feature_upper_bound;
+
+  // Does this instance flow down this path?
+  __host__ __device__ bool EvaluateSplit(float x) const {
+    return x >= feature_lower_bound && x < feature_upper_bound;
+  }
+
+  // Combine two split conditions on the same feature
+  __host__ __device__ void Merge(
+      const MySplitCondition& other) {  // Combine duplicate features
+    feature_lower_bound = max(feature_lower_bound, other.feature_lower_bound);
+    feature_upper_bound = min(feature_upper_bound, other.feature_upper_bound);
+  }
+};
+
+std::vector<gpu_treeshap::PathElement<MySplitCondition>> ExtractPaths(
+    const DecisionTree& dt) {
+  std::vector<gpu_treeshap::PathElement<MySplitCondition>> paths;
   size_t path_idx = 0;
   // Find leaf nodes
   // Work backwards from leaf to root, order does not matter
   // It's also possible to work from root to leaf
-  for (auto i = 0ull; i < dt.nodes.size(); i++) {
+  for (int i = 0; i < static_cast<int>(dt.nodes.size()); i++) {
     if (dt.nodes[i].IsLeaf()) {
       auto child = dt.nodes[i];
       float v = child.leaf_value;
-      size_t child_idx = i;
+      int child_idx = i;
       const float inf = std::numeric_limits<float>::infinity();
       while (!child.IsRoot()) {
         auto parent = dt.nodes[child.parent];
@@ -103,25 +130,30 @@ std::vector<gpu_treeshap::PathElement> ExtractPaths(const DecisionTree& dt) {
         bool is_left_path = parent.left_child == child_idx;
         float lower_bound = is_left_path ? -inf : parent.split_condition;
         float upper_bound = is_left_path ? parent.split_condition : inf;
-        paths.emplace_back(path_idx, parent.feature_idx, 0, lower_bound,
-                           upper_bound, false, zero_fraction, v);
+        paths.push_back({path_idx,
+                         parent.feature_idx,
+                         0,
+                         {lower_bound, upper_bound},
+                         zero_fraction,
+                         v});
         child_idx = child.parent;
         child = parent;
       }
       // Root node has feature -1
-      paths.emplace_back(path_idx, -1, 0, -inf, inf, false, 1.0, v);
+      paths.push_back({path_idx, -1, 0, {-inf, inf}, 1.0, v});
       path_idx++;
     }
   }
   return paths;
 }
 
-std::ostream& operator<<(std::ostream& os,
-                         const std::vector<gpu_treeshap::PathElement>& paths) {
-  std::vector<gpu_treeshap::PathElement> tmp(paths);
+std::ostream& operator<<(
+    std::ostream& os,
+    const std::vector<gpu_treeshap::PathElement<MySplitCondition>>& paths) {
+  std::vector<gpu_treeshap::PathElement<MySplitCondition>> tmp(paths);
   std::sort(tmp.begin(), tmp.end(),
-            [&](const gpu_treeshap::PathElement& a,
-                const gpu_treeshap::PathElement& b) {
+            [&](const gpu_treeshap::PathElement<MySplitCondition>& a,
+                const gpu_treeshap::PathElement<MySplitCondition>& b) {
               if (a.path_idx < b.path_idx) return true;
               if (b.path_idx < a.path_idx) return false;
 
@@ -137,7 +169,8 @@ std::ostream& operator<<(std::ostream& os,
       os << "\n";
     }
     os << " (feature:" << e.feature_idx << ", pz:" << e.zero_fraction << ", ["
-       << e.feature_lower_bound << "<=x<" << e.feature_upper_bound << "])";
+       << e.split_condition.feature_lower_bound << "<=x<"
+       << e.split_condition.feature_upper_bound << "])";
     os << "\n";
   }
   return os;
@@ -189,8 +222,8 @@ int main() {
   data[5] = 1.0;
   DenseDatasetWrapper X(data.data().get(), 2, 3);
   thrust::device_vector<float> phis((X.NumCols() + 1) * X.NumRows());
-  gpu_treeshap::GPUTreeShap(X, paths.begin(), paths.end(), 1,
-                            phis.data().get(), phis.size());
+  gpu_treeshap::GPUTreeShap(X, paths.begin(), paths.end(), 1, phis.begin(),
+                            phis.end());
 
   // Print the resulting feature contributions
   std::cout << "\n";

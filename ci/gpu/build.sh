@@ -50,6 +50,7 @@ nvidia-smi
 $CC --version
 $CXX --version
 
+
 ################################################################################
 # BUILD - Build tests
 ################################################################################
@@ -57,7 +58,7 @@ $CXX --version
 gpuci_logger "Build C++ targets"
 mkdir $WORKSPACE/build
 cd $WORKSPACE/build
-cmake .. -DBUILD_GTEST=ON -DBUILD_EXAMPLES=ON
+cmake .. -DBUILD_GTEST=ON -DBUILD_EXAMPLES=ON -DBUILD_BENCHMARKS=ON
 make -j
 
 ################################################################################
