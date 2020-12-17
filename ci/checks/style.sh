@@ -15,7 +15,7 @@ conda activate rapids
 
 # Check for a consistent code format
 pip install cpplint
-FORMAT=`cpplint --recursive GPUTreeShap tests example 2>&1`
+FORMAT=`cpplint --recursive GPUTreeShap tests example benchmark 2>&1`
 FORMAT_RETVAL=$?
 if [ "$RETVAL" = "0" ]; then
   RETVAL=$FORMAT_RETVAL

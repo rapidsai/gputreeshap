@@ -1,6 +1,6 @@
 # GPUTreeShap
 
-GPUTreeShap is a cuda implementation of the TreeShap algorithm by Lundberg et al. [1] for Nvidia GPUs. It is a header only module designed to be included in decision tree libraries as a fast backend for model interpretability using SHAP values.
+GPUTreeShap is a cuda implementation of the TreeShap algorithm by Lundberg et al. [1] for Nvidia GPUs. It is a header only module designed to be included in decision tree libraries as a fast backend for model interpretability using SHAP values. GPUTreeShap also implements variants of TreeShap based on Taylor-Shapley interaction indices [2], and interventional probability instead of conditional probability [3].
 
 See the associated publication [here](https://arxiv.org/abs/2010.13972)
 ```
@@ -13,6 +13,13 @@ See the associated publication [here](https://arxiv.org/abs/2010.13972)
       primaryClass={cs.LG}
 }
 ```
+
+## Using GPUTreeShap
+GPUTreeShap is integrated with XGBoost 1.3 onwards, [see here for details](https://xgboost.readthedocs.io/en/latest/gpu/index.html#gpu-accelerated-shap-values) and [here for a demo notebook](https://github.com/dmlc/xgboost/blob/master/demo/gpu_acceleration/shap.ipynb).
+
+Integration with the python shap package is a work in progress, and is expected to support a wider range of models such as LightGBM, Catboost, and sklearn random forests.
+
+For usage in C++, see the example directory.
 
 ## Performance
 Using the benchmark script `benchmark/benchmark.py` we run GPUTreeShap as a backend for xgboost and compare its performance against multithreaded CPU based implementation. Test models are generated on four different datasets at different sizes. The below comparison is run on an Nvidia DGX-1 system, comparing a single V100 to 2X 20-Core Intel Xeon
@@ -56,3 +63,7 @@ See examples for sample integration into a C++ decision tree project. GPUTreeSha
 
 ## References
 [1] Lundberg, Scott M., Gabriel G. Erion, and Su-In Lee. "Consistent individualized feature attribution for tree ensembles." arXiv preprint arXiv:1802.03888 (2018).
+
+[2] Sundararajan, Mukund, Kedar Dhamdhere, and Ashish Agarwal. "The Shapley Taylor Interaction Index." International Conference on Machine Learning. PMLR, 2020.
+
+[3] https://drafts.distill.pub/HughChen/its_blog/
