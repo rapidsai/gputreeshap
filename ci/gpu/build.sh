@@ -16,8 +16,10 @@ export CUDA_REL=${CUDA_VERSION%.*}
 # Set home to the job's workspace
 export HOME=$WORKSPACE
 
+# Install gpuCI tools
 curl -s https://raw.githubusercontent.com/rapidsai/gpuci-tools/main/install.sh | bash
-
+source ~/.bashrc
+cd ~
 
 ################################################################################
 # SETUP - Check environment
