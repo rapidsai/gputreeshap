@@ -20,13 +20,13 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/logical.h>
 #include <thrust/reduce.h>
+#include <cub/cub.cuh>
 #include <algorithm>
 #include <functional>
 #include <set>
 #include <stdexcept>
 #include <utility>
 #include <vector>
-#include <cub/cub.cuh>
 
 namespace gpu_treeshap {
 
