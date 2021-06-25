@@ -26,6 +26,7 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
+#include <cub/cub.cuh>
 
 namespace gpu_treeshap {
 
