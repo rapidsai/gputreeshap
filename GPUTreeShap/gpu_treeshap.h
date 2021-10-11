@@ -20,6 +20,7 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/logical.h>
 #include <thrust/reduce.h>
+#include <thrust/host_vector.h>
 #include <cub/cub.cuh>
 #include <algorithm>
 #include <functional>
