@@ -1087,7 +1087,7 @@ void ValidatePaths(const PathVectorT& device_paths,
                      path_lengths.end(), too_long_op);
 
   if (invalid_length) {
-    throw std::invalid_argument("Tree depth must be <= 32");
+    throw std::invalid_argument("Tree depth must be < 32");
   }
 
   IncorrectVOp<SplitConditionT> incorrect_v_op{device_paths.data().get()};
