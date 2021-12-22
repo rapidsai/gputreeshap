@@ -219,7 +219,7 @@ TEST_F(APITest, PathTooLong) {
   for (size_t i = 1; i < model.size(); i++) {
     model[i] = {0, static_cast<int64_t>(i), 0, {0, 0, 0}, 0, 0};
   }
-  ExpectAPIThrow<std::invalid_argument>("Tree depth must be <= 32");
+  ExpectAPIThrow<std::invalid_argument>("Tree depth must be < 32");
 }
 
 TEST_F(APITest, PathVIncorrect) {
