@@ -4,10 +4,10 @@ GPUTreeShap is a cuda implementation of the TreeShap algorithm by Lundberg et al
 
 See the associated publication [here](https://arxiv.org/abs/2010.13972)
 ```
-@misc{mitchell2020gputreeshap,
-      title={GPUTreeShap: Fast Parallel Tree Interpretability}, 
+@misc{mitchell2022gputreeshap,
+      title={GPUTreeShap: Massively Parallel Exact Calculation of SHAP Scores for Tree Ensembles}, 
       author={Rory Mitchell and Eibe Frank and Geoffrey Holmes},
-      year={2020},
+      year={2022},
       eprint={2010.13972},
       archivePrefix={arXiv},
       primaryClass={cs.LG}
@@ -17,7 +17,9 @@ See the associated publication [here](https://arxiv.org/abs/2010.13972)
 ## Using GPUTreeShap
 GPUTreeShap is integrated with XGBoost 1.3 onwards, [see here for details](https://xgboost.readthedocs.io/en/latest/gpu/index.html#gpu-accelerated-shap-values) and [here for a demo notebook](https://github.com/dmlc/xgboost/blob/master/demo/gpu_acceleration/shap.ipynb).
 
-Integration with the python shap package is a work in progress, and is expected to support a wider range of models such as LightGBM, Catboost, and sklearn random forests.
+GPUTreeShap is integrated with the [python shap package](https://shap.readthedocs.io/en/latest/generated/shap.explainers.GPUTree.html#shap.explainers.GPUTree).
+
+GPUTreeShap is integrated with the [cuml project](https://github.com/rapidsai/cuml).
 
 For usage in C++, see the example directory.
 
@@ -58,12 +60,9 @@ E5-2698 CPUs (40 physical cores total).
 ## Memory usage
 GPUTreeShap uses very little working GPU memory, only allocating space proportional to the model size. An application is far more likely to be constrained by the size of the dataset.
 
-## Usage
-See examples for sample integration into a C++ decision tree project. GPUTreeShap accepts a decision tree ensemble in the form of a list of unique paths through all branches of the tree, as well as an interface to a dataset allocated on the GPU, and returns feature contributions for each row in the dataset.
-
 ## References
 [1] Lundberg, Scott M., Gabriel G. Erion, and Su-In Lee. "Consistent individualized feature attribution for tree ensembles." arXiv preprint arXiv:1802.03888 (2018).
 
 [2] Sundararajan, Mukund, Kedar Dhamdhere, and Ashish Agarwal. "The Shapley Taylor Interaction Index." International Conference on Machine Learning. PMLR, 2020.
 
-[3] https://drafts.distill.pub/HughChen/its_blog/
+[3] https://hughchen.github.io/its_blog/index.html
