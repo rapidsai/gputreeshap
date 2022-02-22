@@ -32,7 +32,6 @@ class DenseDatasetWrapper {
   DenseDatasetWrapper(const float* data, int num_rows, int num_cols)
       : data(data), num_rows(num_rows), num_cols(num_cols) {}
   __device__ float GetElement(size_t row_idx, size_t col_idx) const {
-    assert(col_idx >= 0);
     return data[row_idx * num_cols + col_idx];
   }
   __host__ __device__ size_t NumRows() const { return num_rows; }
@@ -90,12 +89,13 @@ void GenerateModel(std::vector<PathElement<SplitConditionT>>* model, int group,
         upper_bound = 1.0f - bound_dis(*gen);
       }
       // Don't make the zero fraction too small
+SplitConditionT split(lower_bound, upper_bound, bern_dis(*gen));
       std::uniform_real_distribution<float> zero_fraction_dis(0.05, 1.0);
       model->emplace_back(PathElement<SplitConditionT>{
           base_path_idx + i,
           feature_dis(*gen),
           group,
-          {lower_bound, upper_bound, bern_dis(*gen)},
+           split,
           zero_fraction_dis(*gen),
           v});
     }
