@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 include(FetchContent)
 project(GPUTreeShap LANGUAGES CXX CUDA)
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CUDA_STANDARD 14)
 option(BUILD_GTEST "Build google tests" OFF)
 option(BUILD_EXAMPLES "Build examples" OFF)
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
@@ -65,3 +65,8 @@ if(BUILD_BENCHMARKS)
   endif()
   target_link_libraries(BenchmarkGPUTreeShap  PRIVATE benchmark::benchmark)
 endif()
+
+include(cmake/doxygen.cmake)
+add_doxygen_target(IN_DOXYFILE Doxyfile.in
+  OUT_DOXYFILE ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+  CWD ${CMAKE_CURRENT_BINARY_DIR})

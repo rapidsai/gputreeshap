@@ -89,7 +89,7 @@ void GenerateModel(std::vector<PathElement<SplitConditionT>>* model, int group,
         upper_bound = 1.0f - bound_dis(*gen);
       }
       // Don't make the zero fraction too small
-SplitConditionT split(lower_bound, upper_bound, bern_dis(*gen));
+      SplitConditionT split(lower_bound, upper_bound, bern_dis(*gen));
       std::uniform_real_distribution<float> zero_fraction_dis(0.05, 1.0);
       model->emplace_back(PathElement<SplitConditionT>{
           base_path_idx + i,

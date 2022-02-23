@@ -161,6 +161,7 @@ __host__ __device__ inline size_t IndexPhiInteractions(size_t row_idx,
   return matrix_offset + i * (num_columns + 1) + j;
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 
 // Shorthand for creating a device vector with an appropriate allocator type
@@ -1206,18 +1207,29 @@ void ComputeBias(const PathVectorT& device_paths, DoubleVectorT* bias) {
 
 };  // namespace detail
 
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
+
+/** \defgroup GPUTreeShap
+ *  @{
+ */
+
+
 /*!
  * Compute feature contributions on the GPU given a set of unique paths through
  * a tree ensemble and a dataset. Uses device memory proportional to the tree
  * ensemble size.
  *
  * \exception std::invalid_argument Thrown when an invalid argument error
- * condition occurs. \tparam  PathIteratorT     Thrust type iterator, may be
+ * condition occurs. 
+ * \tparam  PathIteratorT     Thrust type iterator, may be
  * thrust::device_ptr for device memory, or stl iterator/raw pointer for host
- * memory. \tparam  PhiIteratorT      Thrust type iterator, may be
+ * memory. 
+ * \tparam  PhiIteratorT      Thrust type iterator, may be
  * thrust::device_ptr for device memory, or stl iterator/raw pointer for host
- * memory. Value type must be floating point. \tparam  DatasetT User-specified
- * dataset container. \tparam  DeviceAllocatorT  Optional thrust style
+ * memory. Value type must be floating point. 
+ * \tparam  DatasetT User-specified
+ * dataset container. 
+ * \tparam  DeviceAllocatorT  Optional thrust style
  * allocator.
  *
  * \param X           Thin wrapper over a dataset allocated in device memory. X
@@ -1230,10 +1242,14 @@ void ComputeBias(const PathVectorT& device_paths, DoubleVectorT* bias) {
  * root with feature_idx = -1 and zero_fraction = 1.0. The ordering of path
  * elements inside a unique path does not matter - the result will be the same.
  * Paths may contain duplicate features. See the PathElement class for more
- * information. \param end         Path end iterator. \param num_groups  Number
+ * information. 
+ * \param end         Path end iterator. 
+ * \param num_groups  Number
  * of output groups. In multiclass classification the algorithm outputs feature
- * contributions per output class. \param phis_begin  Begin iterator for output
- * phis. \param phis_end    End iterator for output phis.
+ * contributions per output class. 
+ * \param phis_begin  Begin iterator for output
+ * phis. 
+ * \param phis_end    End iterator for output phis.
  */
 template <typename DeviceAllocatorT = thrust::device_allocator<int>,
           typename DatasetT, typename PathIteratorT, typename PhiIteratorT>
@@ -1526,4 +1542,7 @@ void GPUTreeShapInterventional(DatasetT X, DatasetT R, PathIteratorT begin,
                                     temp_phi.data().get());
   thrust::copy(temp_phi.begin(), temp_phi.end(), phis_begin);
 }
+
+/** @}*/
+
 }  // namespace gpu_treeshap
