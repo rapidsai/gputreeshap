@@ -26,8 +26,8 @@ cd ~
 ################################################################################
 
 gpuci_logger "Install cmake"
-mkdir cmake
-cd cmake
+mkdir cmake-install
+cd cmake-install
 wget https://github.com/Kitware/CMake/releases/download/v3.18.2/cmake-3.18.2-Linux-x86_64.sh
 sh cmake-3.18.2-Linux-x86_64.sh --skip-license
 export PATH=$PATH:$PWD/bin
