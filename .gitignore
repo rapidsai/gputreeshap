@@ -1,1 +1,7 @@
 build/
+*.pkl
+*.json
+*.pdf
+*.csv
+*.png
+*.pyc

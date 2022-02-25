@@ -18,7 +18,7 @@ add_library(GPUTreeShap::GPUTreeShap ALIAS GPUTreeShap)
 target_sources(GPUTreeShap INTERFACE ${GPUTreeShap_SOURCE_DIR}/GPUTreeShap/gpu_treeshap.h)
 target_include_directories(GPUTreeShap INTERFACE ${GPUTreeShap_SOURCE_DIR})
 
-set(COMPILE_OPTIONS --expt-extended-lambda -lineinfo)
+set(COMPILE_OPTIONS --expt-extended-lambda -lineinfo --Werror all-warnings)
 set(GCC_COMPILE_OPTIONS -Xcompiler -Werror,-Wall,-Wextra)
 if(BUILD_GTEST)
   set(gtest_force_shared_crt ON CACHE BOOL "Always use msvcrt.dll")
@@ -60,5 +60,13 @@ if(BUILD_BENCHMARKS)
   add_executable(BenchmarkGPUTreeShap benchmark/benchmark_gpu_treeshap.cu)
   target_link_libraries(BenchmarkGPUTreeShap PRIVATE GPUTreeShap)
   target_compile_options(BenchmarkGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>: ${COMPILE_OPTIONS}>)
+  if(NOT MSVC)
+    target_compile_options(BenchmarkGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${GCC_COMPILE_OPTIONS}>)
+  endif()
   target_link_libraries(BenchmarkGPUTreeShap  PRIVATE benchmark::benchmark)
 endif()
+
+include(cmake/doxygen.cmake)
+add_doxygen_target(IN_DOXYFILE Doxyfile.in
+  OUT_DOXYFILE ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+  CWD ${CMAKE_CURRENT_BINARY_DIR})
