@@ -21,6 +21,7 @@
 #include <thrust/logical.h>
 #include <thrust/reduce.h>
 #include <thrust/host_vector.h>
+#include <thrust/sort.h>
 #include <cub/cub.cuh>
 #include <algorithm>
 #include <functional>
