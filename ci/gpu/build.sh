@@ -32,9 +32,6 @@ env
 gpuci_logger "Check GPU usage"
 nvidia-smi
 
-$CC --version
-$CXX --version
-
 gpuci_logger "Activate conda env"
 . /opt/conda/etc/profile.d/conda.sh
 conda activate rapids
