@@ -15,6 +15,9 @@
  */
 #pragma once
 #include <GPUTreeShap/gpu_treeshap.h>
+
+#include <thrust/device_vector.h>
+
 #include <limits>
 #include <numeric>
 #include <random>
