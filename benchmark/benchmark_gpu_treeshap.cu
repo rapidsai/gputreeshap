@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 #include <GPUTreeShap/gpu_treeshap.h>
+
+#include <thrust/device_vector.h>
+
 #include <benchmark/benchmark.h>
 #include "../tests/test_utils.h"
 

@@ -16,6 +16,11 @@
 
 #include <GPUTreeShap/gpu_treeshap.h>
 #include <cooperative_groups.h>
+
+#include <thrust/device_vector.h>
+#include <thrust/equal.h>
+#include <thrust/host_vector.h>
+
 #include <limits>
 #include <numeric>
 #include <random>

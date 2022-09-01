@@ -15,14 +15,27 @@
  */
 
 #pragma once
+
+#include <thrust/copy.h>
 #include <thrust/device_allocator.h>
 #include <thrust/device_vector.h>
-#include <thrust/iterator/discard_iterator.h>
-#include <thrust/logical.h>
-#include <thrust/reduce.h>
+#include <thrust/execution_policy.h>
+#include <thrust/for_each.h>
+#include <thrust/functional.h>
 #include <thrust/host_vector.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/discard_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/logical.h>
+#include <thrust/pair.h>
+#include <thrust/reduce.h>
+#include <thrust/scan.h>
 #include <thrust/sort.h>
+#include <thrust/system/cuda/error.h>
+#include <thrust/system_error.h>
+
 #include <cub/cub.cuh>
+
 #include <algorithm>
 #include <functional>
 #include <set>
@@ -1172,7 +1185,7 @@ void ComputeBias(const PathVectorT& device_paths, DoubleVectorT* bias) {
                                                   PathIdxTransformOp());
   PathVectorT combined(sorted_paths.size());
   auto combined_out = thrust::reduce_by_key(
-      thrust::cuda ::par(alloc), path_key, path_key + sorted_paths.size(),
+      thrust::cuda::par(alloc), path_key, path_key + sorted_paths.size(),
       sorted_paths.begin(), thrust::make_discard_iterator(), combined.begin(),
       thrust::equal_to<size_t>(),
       [=] __device__(PathElement<SplitConditionT> a,
