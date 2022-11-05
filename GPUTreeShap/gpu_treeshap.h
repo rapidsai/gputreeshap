@@ -904,7 +904,7 @@ void DeduplicatePaths(PathVectorT* device_paths,
   size_t* h_num_runs_out;
   CheckCuda(cudaMallocHost(&h_num_runs_out, sizeof(size_t)));
 
-  auto combine = [] __device__(PathElement<SplitConditionT> a,
+  auto combine = [] __host__ __device__(PathElement<SplitConditionT> a,
                                PathElement<SplitConditionT> b) {
     // Combine duplicate features
     a.split_condition.Merge(b.split_condition);
