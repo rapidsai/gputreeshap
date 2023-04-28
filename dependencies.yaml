@@ -1,0 +1,24 @@
+# Dependency list for https://github.com/rapidsai/dependency-file-generator
+files:
+  build:
+    output: none
+    includes:
+      - build
+      - docs
+channels:
+  - rapidsai
+  - conda-forge
+dependencies:
+  build:
+    common:
+      - output_types: [conda]
+        packages:
+          - binutils
+          - cmake
+          - gxx <=11
+          - make
+  docs:
+    common:
+      - output_types: [conda]
+        packages:
+          - doxygen

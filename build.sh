@@ -1,4 +1,6 @@
 #!/bin/bash
+set -euo pipefail
+
 mkdir -p build
 cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_GTEST=ON -DBUILD_EXAMPLES=ON -DBUILD_BENCHMARKS=ON

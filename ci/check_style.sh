@@ -1,21 +1,15 @@
 #!/bin/bash
-# Copyright (c) 2020, NVIDIA CORPORATION.
-#####################
-# GPUTreeShap Style Tester #
-#####################
+# Copyright (c) 2023, NVIDIA CORPORATION.
 
-# Ignore errors and set path
+# Ignore errors
 set +e
-PATH=/opt/conda/bin:$PATH
 RETVAL="0"
 
-# Activate common conda env
 . /opt/conda/etc/profile.d/conda.sh
-conda activate rapids
 
 # Check for a consistent code format
 pip install cpplint
-FORMAT=`cpplint --recursive GPUTreeShap tests example benchmark 2>&1`
+FORMAT=$(cpplint --recursive GPUTreeShap tests example benchmark 2>&1)
 FORMAT_RETVAL=$?
 if [ "$RETVAL" = "0" ]; then
   RETVAL=$FORMAT_RETVAL
