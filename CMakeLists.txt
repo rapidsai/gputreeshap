@@ -26,7 +26,7 @@ include(rapids-find)
 
 rapids_cuda_init_architectures(CUML)
 
-project(GPUTreeShap LANGUAGES CXX CUDA)
+project(GPUTreeShap VERSION 23.08.00 LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 option(BUILD_GTEST "Build google tests" OFF)
