@@ -16,6 +16,13 @@
 
 cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)
 
+
+include(FetchContent)
+
+project(GPUTreeShap VERSION 23.08.00 LANGUAGES CXX CUDA)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 17)
+
 include(fetch_rapids.cmake)
 
 include(rapids-cmake)
@@ -25,8 +32,6 @@ include(rapids-export)
 include(rapids-find)
 
 rapids_cuda_init_architectures(CUML)
-
-project(GPUTreeShap VERSION 23.08.00 LANGUAGES CXX CUDA)
 
 option(BUILD_GTEST "Build google tests" OFF)
 option(BUILD_EXAMPLES "Build examples" OFF)
