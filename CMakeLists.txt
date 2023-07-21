@@ -27,8 +27,7 @@ include(rapids-find)
 rapids_cuda_init_architectures(CUML)
 
 project(GPUTreeShap VERSION 23.08.00 LANGUAGES CXX CUDA)
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CUDA_STANDARD 17)
+
 option(BUILD_GTEST "Build google tests" OFF)
 option(BUILD_EXAMPLES "Build examples" OFF)
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
@@ -47,8 +46,11 @@ add_library(GPUTreeShap::GPUTreeShap ALIAS GPUTreeShap)
 target_sources(GPUTreeShap INTERFACE ${GPUTreeShap_SOURCE_DIR}/GPUTreeShap/gpu_treeshap.h)
 target_include_directories(GPUTreeShap INTERFACE ${GPUTreeShap_SOURCE_DIR})
 
+set_property(TARGET GPUTreeShap PROPERTY CXX_STANDARD 17)
+set_property(TARGET GPUTreeShap PROPERTY CUDA_STANDARD 17)
 set(COMPILE_OPTIONS --expt-extended-lambda -lineinfo --Werror all-warnings)
 set(GCC_COMPILE_OPTIONS -Xcompiler -Werror,-Wall,-Wextra)
+
 if(BUILD_GTEST)
   include(${rapids-cmake-dir}/cpm/gtest.cmake)
   rapids_cpm_gtest()
