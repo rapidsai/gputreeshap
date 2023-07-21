@@ -1,8 +1,33 @@
-cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
-include(FetchContent)
-project(GPUTreeShap LANGUAGES CXX CUDA)
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CUDA_STANDARD 14)
+#=============================================================================
+# Copyright (c) 2020-2023 NVIDIA CORPORATION.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#=============================================================================
+
+cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)
+
+include(fetch_rapids.cmake)
+
+include(rapids-cmake)
+include(rapids-cpm)
+include(rapids-cuda)
+include(rapids-export)
+include(rapids-find)
+
+rapids_cuda_init_architectures(CUML)
+
+project(GPUTreeShap VERSION 23.08.00 LANGUAGES CXX CUDA)
+
 option(BUILD_GTEST "Build google tests" OFF)
 option(BUILD_EXAMPLES "Build examples" OFF)
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
@@ -12,23 +37,24 @@ if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
 endif()
 
+# add third party dependencies using CPM
+rapids_cpm_init()
+
 # GPUTreeSHAP target is header-only
 add_library(GPUTreeShap INTERFACE)
 add_library(GPUTreeShap::GPUTreeShap ALIAS GPUTreeShap)
 target_sources(GPUTreeShap INTERFACE ${GPUTreeShap_SOURCE_DIR}/GPUTreeShap/gpu_treeshap.h)
 target_include_directories(GPUTreeShap INTERFACE ${GPUTreeShap_SOURCE_DIR})
 
+set_property(TARGET GPUTreeShap PROPERTY CXX_STANDARD 17)
+set_property(TARGET GPUTreeShap PROPERTY CUDA_STANDARD 17)
 set(COMPILE_OPTIONS --expt-extended-lambda -lineinfo --Werror all-warnings)
 set(GCC_COMPILE_OPTIONS -Xcompiler -Werror,-Wall,-Wextra)
+
 if(BUILD_GTEST)
-  set(gtest_force_shared_crt ON CACHE BOOL "Always use msvcrt.dll")
-  FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG        release-1.8.1
-    GIT_SHALLOW       true
-  )
-  FetchContent_MakeAvailable(googletest)
+  include(${rapids-cmake-dir}/cpm/gtest.cmake)
+  rapids_cpm_gtest()
+
   add_executable(TestGPUTreeShap tests/test_gpu_treeshap.cu)
   target_link_libraries(TestGPUTreeShap PRIVATE GPUTreeShap)
   target_compile_options(TestGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>: ${COMPILE_OPTIONS}>)
@@ -49,14 +75,9 @@ if(BUILD_EXAMPLES)
 endif()
 
 if(BUILD_BENCHMARKS)
-  FetchContent_Declare(
-    benchmark
-    GIT_REPOSITORY https://github.com/google/benchmark.git
-    GIT_TAG        v1.5.2
-    GIT_SHALLOW       true
-  )
-  set(BENCHMARK_ENABLE_TESTING OFF CACHE INTERNAL "Google benchmark tests off")
-  FetchContent_MakeAvailable(benchmark)
+  include(${rapids-cmake-dir}/cpm/gbench.cmake)
+  rapids_cpm_gbench()
+
   add_executable(BenchmarkGPUTreeShap benchmark/benchmark_gpu_treeshap.cu)
   target_link_libraries(BenchmarkGPUTreeShap PRIVATE GPUTreeShap)
   target_compile_options(BenchmarkGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>: ${COMPILE_OPTIONS}>)
