@@ -19,7 +19,7 @@ cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)
 
 include(FetchContent)
 
-project(GPUTreeShap VERSION 24.04.00 LANGUAGES C CXX CUDA)
+project(GPUTreeShap VERSION 24.04.00 LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 

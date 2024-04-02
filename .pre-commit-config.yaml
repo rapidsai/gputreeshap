@@ -17,6 +17,5 @@ repos:
       - id: verify-copyright
         args: ["--fix", "--main-branch", "main"]
 
-
 default_language_version:
       python: python3
