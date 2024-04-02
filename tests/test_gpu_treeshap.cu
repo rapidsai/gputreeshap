@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, NVIDIA CORPORATION.
+ * Copyright (c) 2020-2024, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include <gtest/gtest.h>
+
 #include <GPUTreeShap/gpu_treeshap.h>
 #include <cooperative_groups.h>
 
@@ -25,7 +27,6 @@
 #include <numeric>
 #include <random>
 #include <vector>
-#include "gtest/gtest.h"
 #include "tests/test_utils.h"
 #include "../GPUTreeShap/gpu_treeshap.h"
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright (c) 2023 NVIDIA CORPORATION.
+# Copyright (c) 2023-2024, NVIDIA CORPORATION.
 ###############################
 # gputreeshap Version Updater #
 ###############################
@@ -31,7 +31,7 @@ function sed_runner() {
 }
 
 # CMakeLists
-sed_runner 's/'"GPUTREESHAP VERSION .* LANGUAGES"'/'"GPUTREESHAP VERSION ${NEXT_FULL_TAG} LANGUAGES"'/g' CMakeLists.txt
+sed_runner 's/'"GPUTreeShap VERSION .* LANGUAGES"'/'"GPUTreeShap VERSION ${NEXT_FULL_TAG} LANGUAGES"'/g' CMakeLists.txt
 
 # rapids-cmake version
 sed_runner 's/'"branch-.*\/RAPIDS.cmake"'/'"branch-${NEXT_SHORT_TAG}\/RAPIDS.cmake"'/g' fetch_rapids.cmake

@@ -5,7 +5,7 @@ GPUTreeShap is a cuda implementation of the TreeShap algorithm by Lundberg et al
 See the associated publication [here](https://arxiv.org/abs/2010.13972)
 ```
 @misc{mitchell2022gputreeshap,
-      title={GPUTreeShap: Massively Parallel Exact Calculation of SHAP Scores for Tree Ensembles}, 
+      title={GPUTreeShap: Massively Parallel Exact Calculation of SHAP Scores for Tree Ensembles},
       author={Rory Mitchell and Eibe Frank and Geoffrey Holmes},
       year={2022},
       eprint={2010.13972},

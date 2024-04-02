@@ -1,5 +1,5 @@
 #=============================================================================
-# Copyright (c) 2020-2023 NVIDIA CORPORATION.
+# Copyright (c) 2020-2024, NVIDIA CORPORATION.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)
 
 include(FetchContent)
 
-project(GPUTreeShap VERSION 23.08.00 LANGUAGES CXX CUDA)
+project(GPUTreeShap VERSION 24.04.00 LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 
@@ -65,9 +65,8 @@ if(BUILD_GTEST)
   target_compile_options(TestGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>: ${COMPILE_OPTIONS}>)
   if(NOT MSVC)
     target_compile_options(TestGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${GCC_COMPILE_OPTIONS}>)
-  else()
   endif()
-  target_link_libraries(TestGPUTreeShap  PRIVATE gtest gtest_main)
+  target_link_libraries(TestGPUTreeShap PRIVATE GTest::gtest GTest::gtest_main)
 endif()
 
 if(BUILD_EXAMPLES)

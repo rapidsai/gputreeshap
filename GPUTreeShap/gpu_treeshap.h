@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, NVIDIA CORPORATION.
+ * Copyright (c) 2022-2024, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1234,15 +1234,15 @@ void ComputeBias(const PathVectorT& device_paths, DoubleVectorT* bias) {
  * ensemble size.
  *
  * \exception std::invalid_argument Thrown when an invalid argument error
- * condition occurs. 
+ * condition occurs.
  * \tparam  PathIteratorT     Thrust type iterator, may be
  * thrust::device_ptr for device memory, or stl iterator/raw pointer for host
- * memory. 
+ * memory.
  * \tparam  PhiIteratorT      Thrust type iterator, may be
  * thrust::device_ptr for device memory, or stl iterator/raw pointer for host
- * memory. Value type must be floating point. 
+ * memory. Value type must be floating point.
  * \tparam  DatasetT User-specified
- * dataset container. 
+ * dataset container.
  * \tparam  DeviceAllocatorT  Optional thrust style
  * allocator.
  *
@@ -1256,13 +1256,13 @@ void ComputeBias(const PathVectorT& device_paths, DoubleVectorT* bias) {
  * root with feature_idx = -1 and zero_fraction = 1.0. The ordering of path
  * elements inside a unique path does not matter - the result will be the same.
  * Paths may contain duplicate features. See the PathElement class for more
- * information. 
- * \param end         Path end iterator. 
+ * information.
+ * \param end         Path end iterator.
  * \param num_groups  Number
  * of output groups. In multiclass classification the algorithm outputs feature
- * contributions per output class. 
+ * contributions per output class.
  * \param phis_begin  Begin iterator for output
- * phis. 
+ * phis.
  * \param phis_end    End iterator for output phis.
  */
 template <typename DeviceAllocatorT = thrust::device_allocator<int>,
