@@ -19,7 +19,7 @@ cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)
 
 include(FetchContent)
 
-project(GPUTreeShap VERSION 23.08.00 LANGUAGES CXX CUDA)
+project(GPUTreeShap VERSION 23.08.00 LANGUAGES C CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 
@@ -66,7 +66,7 @@ if(BUILD_GTEST)
   if(NOT MSVC)
     target_compile_options(TestGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${GCC_COMPILE_OPTIONS}>)
   endif()
-  target_link_libraries(TestGPUTreeShap  PRIVATE gtest gtest_main)
+  target_link_libraries(TestGPUTreeShap PRIVATE GTest::gtest GTest::gtest_main)
 endif()
 
 if(BUILD_EXAMPLES)

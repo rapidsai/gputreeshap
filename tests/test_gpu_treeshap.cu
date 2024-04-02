@@ -25,7 +25,7 @@
 #include <numeric>
 #include <random>
 #include <vector>
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 #include "tests/test_utils.h"
 #include "../GPUTreeShap/gpu_treeshap.h"
 
