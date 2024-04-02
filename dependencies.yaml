@@ -17,6 +17,8 @@ dependencies:
         packages:
           - binutils
           - cmake
+          - gcc=11.*
+          - gxx=11.*
           - make
     specific:
       - output_types: conda
@@ -24,12 +26,10 @@ dependencies:
           - matrix:
               arch: x86_64
             packages:
-              - gcc_linux-64=11.*
               - sysroot_linux-64==2.17
           - matrix:
               arch: aarch64
             packages:
-              - gcc_linux-aarch64=11.*
               - sysroot_linux-aarch64==2.17
   cuda_version:
     specific:
