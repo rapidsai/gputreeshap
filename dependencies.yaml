@@ -20,6 +20,11 @@ dependencies:
           - gcc=11.*
           - gxx=11.*
           - make
+  checks:
+    common:
+      - output_types: [conda, requirements]
+        packages:
+          - pre-commit
   cuda_version:
     specific:
       - output_types: conda
