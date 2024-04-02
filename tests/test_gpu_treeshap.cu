@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include <gtest/gtest.h>
+
 #include <GPUTreeShap/gpu_treeshap.h>
 #include <cooperative_groups.h>
 
@@ -25,7 +27,6 @@
 #include <numeric>
 #include <random>
 #include <vector>
-#include <gtest/gtest.h>
 #include "tests/test_utils.h"
 #include "../GPUTreeShap/gpu_treeshap.h"
 
