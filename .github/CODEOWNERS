@@ -1,7 +1,6 @@
 #gputreeshap code owners
 *                  @rapidsai/gputreeshap-write
 
-#build/ops code owners
 #CI code owners
 /.github/                @rapidsai/ci-codeowners
 /ci/                     @rapidsai/ci-codeowners
