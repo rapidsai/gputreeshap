@@ -16,6 +16,11 @@ repos:
     hooks:
       - id: verify-copyright
         args: ["--fix", "--main-branch", "main"]
+  - repo: https://github.com/rapidsai/dependency-file-generator
+    rev: v1.13.11
+    hooks:
+      - id: rapids-dependency-file-generator
+        args: ["--clean"]
 
 default_language_version:
       python: python3
