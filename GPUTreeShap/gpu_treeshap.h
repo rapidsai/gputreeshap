@@ -459,16 +459,13 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
                const PathElement<SplitConditionT>* path_elements,
                const size_t* bin_segments, size_t num_groups, double* phis) {
   // Use shared memory for structs, otherwise nvcc puts in local memory
-  __shared__ DatasetT s_X;
-  s_X = X;
   __shared__ PathElement<SplitConditionT> s_elements[kBlockSize];
   PathElement<SplitConditionT>& e = s_elements[threadIdx.x];
 
   size_t start_row, end_row;
   bool thread_active;
-  ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(
-      s_X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, &e,
-      &thread_active);
+  ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(X, bins_per_row, path_elements, bin_segments,
+                                                      &start_row, &end_row, &e, &thread_active);
   uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
   if (!thread_active) return;
 
@@ -564,16 +561,13 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
                            const size_t* bin_segments, size_t num_groups,
                            double* phis_interactions) {
   // Use shared memory for structs, otherwise nvcc puts in local memory
-  __shared__ DatasetT s_X;
-  s_X = X;
   __shared__ PathElement<SplitConditionT> s_elements[kBlockSize];
   PathElement<SplitConditionT>* e = &s_elements[threadIdx.x];
 
   size_t start_row, end_row;
   bool thread_active;
-  ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(
-      s_X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, e,
-      &thread_active);
+  ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(X, bins_per_row, path_elements, bin_segments,
+                                                      &start_row, &end_row, e, &thread_active);
   uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
   if (!thread_active) return;
 
