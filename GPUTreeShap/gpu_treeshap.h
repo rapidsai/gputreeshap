@@ -464,8 +464,9 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
 
   size_t start_row, end_row;
   bool thread_active;
-  ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(X, bins_per_row, path_elements, bin_segments,
-                                                      &start_row, &end_row, &e, &thread_active);
+  ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(
+      X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, &e,
+      &thread_active);
   uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
   if (!thread_active) return;
 
@@ -566,8 +567,9 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
 
   size_t start_row, end_row;
   bool thread_active;
-  ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(X, bins_per_row, path_elements, bin_segments,
-                                                      &start_row, &end_row, e, &thread_active);
+  ConfigureThread<DatasetT, kBlockSize, kRowsPerWarp>(
+      X, bins_per_row, path_elements, bin_segments, &start_row, &end_row, e,
+      &thread_active);
   uint32_t mask = __ballot_sync(FULL_MASK, thread_active);
   if (!thread_active) return;
 
