@@ -1,42 +1,62 @@
-import xgboost as xgb
-import numpy as np
-import time
-from sklearn import datasets
-from joblib import Memory
-import pandas as pd
+# Copyright (c) 2020-2024, NVIDIA CORPORATION.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+from __future__ import annotations
+
 import argparse
+import time
+
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+from joblib import Memory
+from sklearn import datasets
 
 memory = Memory('./cachedir', verbose=0)
 
 
 # Contains a dataset in numpy format as well as the relevant objective and metric
 class TestDataset:
-    def __init__(self, name, Xy, objective
-                 ):
+    def __init__(self, name, Xy, objective):
         self.name = name
         self.objective = objective
         self.X, self.y = Xy
 
     def set_params(self, params_in):
-        params_in['objective'] = self.objective
+        params_in["objective"] = self.objective
         if self.objective == "multi:softmax":
             params_in["num_class"] = int(np.max(self.y) + 1)
         return params_in
 
     def get_dmat(self):
-        return xgb.DMatrix(self.X, self.y)
+        return xgb.QuantileDMatrix(self.X, self.y, enable_categorical=True)
 
     def get_test_dmat(self, num_rows):
         rs = np.random.RandomState(432)
-        return xgb.DMatrix(self.X[rs.randint(0, self.X.shape[0], size=num_rows), :])
+        if hasattr(self.X, "iloc"):
+            x = self.X.iloc[rs.randint(0, self.X.shape[0], size=num_rows), :]
+        else:
+            x = self.X[rs.randint(0, self.X.shape[0], size=num_rows), :]
+        return xgb.DMatrix(x, enable_categorical=True)
 
 
 @memory.cache
-def train_model(dataset, max_depth, num_rounds):
+def train_model(dataset: TestDataset, max_depth: int, num_rounds: int) -> xgb.Booster:
     dmat = dataset.get_dmat()
-    params = {'tree_method': 'gpu_hist', 'max_depth': max_depth, 'eta': 0.01}
+    params = {'tree_method': 'hist', "device": "gpu", 'max_depth': max_depth, 'eta': 0.01}
     params = dataset.set_params(params)
-    model = xgb.train(params, dmat, num_rounds, [(dmat, 'train')])
+    model = xgb.train(params, dmat, num_rounds, evals=[(dmat, 'train')])
     return model
 
 
@@ -64,33 +84,34 @@ def get_model_stats(model):
 
 
 class Model:
-    def __init__(self, name, dataset, num_rounds, max_depth):
+    def __init__(
+        self, name: str, dataset: TestDataset, num_rounds: int, max_depth: int
+    ) -> None:
         self.name = name
         self.dataset = dataset
         self.num_rounds = num_rounds
         self.max_depth = max_depth
         print("Training " + name)
         self.xgb_model = train_model(dataset, max_depth, num_rounds)
-        self.num_trees, self.num_leaves, self.average_depth = get_model_stats(self.xgb_model)
+        self.num_trees, self.num_leaves, self.average_depth = get_model_stats(
+            self.xgb_model
+        )
 
 
 def check_accuracy(shap, margin):
-    if len(shap.shape) == 2:
-        sum = np.sum(shap, axis=len(shap.shape) - 1)
-    else:
-        sum = np.sum(shap, axis=(len(shap.shape) - 1, len(shap.shape) - 2))
+    shap = np.sum(shap, axis=len(shap.shape) - 1)
 
-    if not np.allclose(sum, margin, 1e-1, 1e-1):
+    if not np.allclose(shap, margin, 1e-1, 1e-1):
         print("Warning: Failed 1e-1 accuracy")
 
 
-def get_models(model):
+def get_models(model: str) -> list[Model]:
     test_datasets = [
+        TestDataset("adult", fetch_adult(), "binary:logistic"),
         TestDataset("covtype", datasets.fetch_covtype(return_X_y=True), "multi:softmax"),
         TestDataset("cal_housing", datasets.fetch_california_housing(return_X_y=True),
                     "reg:squarederror"),
         TestDataset("fashion_mnist", fetch_fashion_mnist(), "multi:softmax"),
-        TestDataset("adult", fetch_adult(), "binary:logistic"),
     ]
 
     models = []
@@ -110,24 +131,37 @@ def get_models(model):
 def print_model_stats(models, args):
     # get model statistics
     models_df = pd.DataFrame(
-        columns=["model", "num_rounds", "num_trees", "num_leaves", "max_depth", "average_depth"])
-    for m in models:
-        models_df = models_df.append(
-            {"model": m.name, "num_rounds": m.num_rounds, "num_trees": m.num_trees,
-             "num_leaves": m.num_leaves, "max_depth": m.max_depth,
-             "average_depth": m.average_depth},
-            ignore_index=True)
+        columns=[
+            "model",
+            "num_rounds",
+            "num_trees",
+            "num_leaves",
+            "max_depth",
+            "average_depth",
+        ]
+    )
+    for i, m in enumerate(models):
+        df = pd.DataFrame.from_dict(
+            {
+                "model": [m.name],
+                "num_rounds": [m.num_rounds],
+                "num_trees": [m.num_trees],
+                "num_leaves": [m.num_leaves],
+                "max_depth": [m.max_depth],
+                "average_depth": [m.average_depth],
+            }
+        )
+        models_df = pd.concat([models_df, df])
     print(models_df)
     print("Writing model statistics to: " + args.out_models)
     models_df.to_csv(args.out_models, index=False)
 
 
-def run_benchmark(args):
-    models = get_models(args)
+def run_benchmark(args: argparse.Namespace) -> None:
+    models = get_models(args.model)
     print_model_stats(models, args)
 
-    predictors = ["cpu_predictor", "gpu_predictor"]
-    # predictors = ["gpu_predictor"]
+    devices = ["cpu", "gpu"]
     test_rows = args.nrows
     df = pd.DataFrame(
         columns=["model", "test_rows", "cpu_time(s)", "cpu_std", "gpu_time(s)", "gpu_std",
@@ -135,8 +169,8 @@ def run_benchmark(args):
     for m in models:
         dtest = m.dataset.get_test_dmat(test_rows)
         result_row = {"model": m.name, "test_rows": test_rows, "cpu_time(s)": 0.0}
-        for p in predictors:
-            m.xgb_model.set_param({"predictor": p})
+        for p in devices:
+            m.xgb_model.set_param({"device": p})
             samples = []
             for i in range(args.niter):
                 start = time.perf_counter()
@@ -145,7 +179,7 @@ def run_benchmark(args):
                 else:
                     xgb_shap = m.xgb_model.predict(dtest, pred_contribs=True)
                 samples.append(time.perf_counter() - start)
-            if p is "gpu_predictor":
+            if p == "gpu":
                 result_row["gpu_time(s)"] = np.mean(samples)
                 result_row["gpu_std"] = np.std(samples)
             else:
@@ -156,8 +190,7 @@ def run_benchmark(args):
             check_accuracy(xgb_shap, margin)
 
         result_row["speedup"] = result_row["cpu_time(s)"] / result_row["gpu_time(s)"]
-        df = df.append(result_row,
-                       ignore_index=True)
+        df = pd.concat([df, pd.DataFrame.from_records([result_row])])
         print(df)
     print("Writing results to: " + args.out)
     df.to_csv(args.out, index=False)
