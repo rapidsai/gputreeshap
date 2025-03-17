@@ -21,9 +21,20 @@ dependencies:
         packages:
           - binutils
           - cmake
-          - gcc=11.*
-          - gxx=11.*
           - make
+    specific:
+      - output_types: conda
+        matrices:
+          - matrix:
+              cuda: "11.*"
+            packages:
+              - gcc=11.*
+              - gxx=11.*
+          - matrix:
+              cuda: "12.*"
+            packages:
+              - gcc=13.*
+              - gxx=13.*
   checks:
     common:
       - output_types: [conda, requirements]
@@ -33,6 +44,10 @@ dependencies:
     specific:
       - output_types: conda
         matrices:
+          - matrix:
+              cuda: "11.4"
+            packages:
+              - cuda-version=11.4
           - matrix:
               cuda: "11.8"
             packages:
@@ -49,6 +64,10 @@ dependencies:
               cuda: "12.5"
             packages:
               - cuda-version=12.5
+          - matrix:
+              cuda: "12.8"
+            packages:
+              - cuda-version=12.8
   cuda:
     specific:
       - output_types: conda
