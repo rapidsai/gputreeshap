@@ -32,9 +32,9 @@ project(GPUTreeShap VERSION 25.04.00 LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 
-option(BUILD_GTEST "Build google tests" OFF)
-option(BUILD_EXAMPLES "Build examples" OFF)
-option(BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(GPUTREESHAP_BUILD_GTEST "Build google tests" OFF)
+option(GPUTREESHAP_BUILD_EXAMPLES "Build examples" OFF)
+option(GPUTREESHAP_BUILD_BENCHMARKS "Build benchmarks" OFF)
 
 # Use release build by default
 if (NOT CMAKE_BUILD_TYPE)
@@ -60,7 +60,7 @@ set_property(TARGET GPUTreeShap PROPERTY CUDA_STANDARD 17)
 set(COMPILE_OPTIONS --expt-extended-lambda -lineinfo --Werror all-warnings)
 set(GCC_COMPILE_OPTIONS -Xcompiler -Werror,-Wall,-Wextra)
 
-if(BUILD_GTEST)
+if(GPUTREESHAP_BUILD_GTEST)
   include(${rapids-cmake-dir}/cpm/gtest.cmake)
   rapids_cpm_gtest()
 
@@ -73,7 +73,7 @@ if(BUILD_GTEST)
   target_link_libraries(TestGPUTreeShap PRIVATE GTest::gtest GTest::gtest_main)
 endif()
 
-if(BUILD_EXAMPLES)
+if(GPUTREESHAP_BUILD_EXAMPLES)
   add_executable(GPUTreeShapExample example/example.cu)
   target_link_libraries(GPUTreeShapExample PRIVATE GPUTreeShap)
   target_compile_options(GPUTreeShapExample PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${COMPILE_OPTIONS}>)
@@ -82,7 +82,7 @@ if(BUILD_EXAMPLES)
   endif()
 endif()
 
-if(BUILD_BENCHMARKS)
+if(GPUTREESHAP_BUILD_BENCHMARKS)
   include(${rapids-cmake-dir}/cpm/gbench.cmake)
   rapids_cpm_gbench()
 
