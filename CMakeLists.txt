@@ -87,7 +87,7 @@ if(BUILD_BENCHMARKS)
   rapids_cpm_gbench()
 
   add_executable(BenchmarkGPUTreeShap benchmark/benchmark_gpu_treeshap.cu)
-  target_link_libraries(BenchmarkGPUTreeShap PRIVATE GPUTreeShap)
+  target_link_libraries(BenchmarkGPUTreeShap PRIVATE GPUTreeShap ${CMAKE_DL_LIBS})
   target_compile_options(BenchmarkGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>: ${COMPILE_OPTIONS}>)
   if(NOT MSVC)
     target_compile_options(BenchmarkGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${GCC_COMPILE_OPTIONS}>)
