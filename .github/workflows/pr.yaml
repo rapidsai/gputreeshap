@@ -28,3 +28,6 @@ jobs:
     with:
       build_type: pull-request
       script: ci/build_and_test.sh
+      # This project does not build with CUDA 11.4, see
+      # https://github.com/rapidsai/gputreeshap/issues/52
+      matrix_filter: map(select(.CUDA_VER != "11.4.3"))
