@@ -39,25 +39,28 @@ dependencies:
               cuda: "11.8"
             packages:
               - gcc_linux-64=11.*
+              - gxx_linux-64=11.*
               - nvcc_linux-64=11.8
           - matrix:
               arch: aarch64
               cuda: "11.8"
             packages:
               - gcc_linux-aarch64=11.*
+              - gxx_linux-aarch64=11.*
               - nvcc_linux-aarch64=11.8
           - matrix:
               arch: x86_64
               cuda: "12.*"
             packages:
-              - cuda-nvcc
               - gcc_linux-64=13.*
+              - gxx_linux-64=13.*
+              - cuda-nvcc
           - matrix:
               arch: aarch64
               cuda: "12.*"
             packages:
+              - gxx_linux-aarch64=13.*
               - cuda-nvcc
-              - gcc_linux-aarch64=13.*
   checks:
     common:
       - output_types: [conda, requirements]
