@@ -28,4 +28,3 @@ jobs:
     with:
       build_type: pull-request
       script: ci/build_and_test.sh
-      matrix_filter: map(select(.ARCH == "amd64"))
