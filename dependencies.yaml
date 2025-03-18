@@ -19,22 +19,45 @@ dependencies:
     common:
       - output_types: conda
         packages:
-          - binutils
           - cmake
           - make
     specific:
       - output_types: conda
         matrices:
           - matrix:
-              cuda: "11.*"
+              arch: x86_64
             packages:
-              - gcc=11.*
-              - gxx=11.*
+              - sysroot_linux-64==2.28
           - matrix:
+              arch: aarch64
+            packages:
+              - sysroot_linux-aarch64==2.28
+      - output_types: conda
+        matrices:
+          - matrix:
+              arch: x86_64
+              cuda: "11.8"
+            packages:
+              - gcc_linux-64=11.*
+              - nvcc_linux-64=11.8
+          - matrix:
+              arch: aarch64
+              cuda: "11.8"
+            packages:
+              - gcc_linux-aarch64=11.*
+              - nvcc_linux-aarch64=11.8
+          - matrix:
+              arch: x86_64
               cuda: "12.*"
             packages:
-              - gcc=13.*
-              - gxx=13.*
+              - cuda-nvcc
+              - gcc_linux-64=13.*
+          - matrix:
+              arch: aarch64
+              cuda: "12.*"
+            packages:
+              - cuda-nvcc
+              - gcc_linux-aarch64=13.*
   checks:
     common:
       - output_types: [conda, requirements]
@@ -71,12 +94,11 @@ dependencies:
           - matrix:
               cuda: "12.*"
             packages:
-              - cuda-nvcc
               - cuda-cudart-dev
           - matrix:
               cuda: "11.*"
-            # GPUTreeShap CI uses the container's CUDA 11.8.
             packages:
+              - cudatoolkit
   docs:
     common:
       - output_types: conda
