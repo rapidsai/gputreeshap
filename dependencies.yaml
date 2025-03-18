@@ -52,15 +52,15 @@ dependencies:
               arch: x86_64
               cuda: "12.*"
             packages:
-              - gcc_linux-64=13.*
-              - gxx_linux-64=13.*
+              - gcc_linux-64=12.*
+              - gxx_linux-64=12.*
               - cuda-nvcc
           - matrix:
               arch: aarch64
               cuda: "12.*"
             packages:
-              - gcc_linux-aarch64=13.*
-              - gxx_linux-aarch64=13.*
+              - gcc_linux-aarch64=12.*
+              - gxx_linux-aarch64=12.*
               - cuda-nvcc
   checks:
     common:
