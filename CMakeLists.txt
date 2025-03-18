@@ -1,5 +1,5 @@
 #=============================================================================
-# Copyright (c) 2020-2024, NVIDIA CORPORATION.
+# Copyright (c) 2020-2025, NVIDIA CORPORATION.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,14 +14,9 @@
 # limitations under the License.
 #=============================================================================
 
-cmake_minimum_required(VERSION 3.23.1 FATAL_ERROR)
-
+cmake_minimum_required(VERSION 3.30.4 FATAL_ERROR)
 
 include(FetchContent)
-
-project(GPUTreeShap VERSION 24.10.00 LANGUAGES CXX CUDA)
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CUDA_STANDARD 17)
 
 include(fetch_rapids.cmake)
 
@@ -31,11 +26,15 @@ include(rapids-cuda)
 include(rapids-export)
 include(rapids-find)
 
-rapids_cuda_init_architectures(CUML)
+rapids_cuda_init_architectures(GPUTreeShap)
 
-option(BUILD_GTEST "Build google tests" OFF)
-option(BUILD_EXAMPLES "Build examples" OFF)
-option(BUILD_BENCHMARKS "Build benchmarks" OFF)
+project(GPUTreeShap VERSION 25.04.00 LANGUAGES CXX CUDA)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 17)
+
+option(GPUTREESHAP_BUILD_GTEST "Build google tests" OFF)
+option(GPUTREESHAP_BUILD_EXAMPLES "Build examples" OFF)
+option(GPUTREESHAP_BUILD_BENCHMARKS "Build benchmarks" OFF)
 
 # Use release build by default
 if (NOT CMAKE_BUILD_TYPE)
@@ -45,18 +44,23 @@ endif()
 # add third party dependencies using CPM
 rapids_cpm_init()
 
-# GPUTreeSHAP target is header-only
+include(${rapids-cmake-dir}/cpm/cccl.cmake)
+rapids_cpm_cccl(BUILD_EXPORT_SET gputreeshap-exports
+                INSTALL_EXPORT_SET gputreeshap-exports)
+
+# GPUTreeShap target is header-only
 add_library(GPUTreeShap INTERFACE)
 add_library(GPUTreeShap::GPUTreeShap ALIAS GPUTreeShap)
 target_sources(GPUTreeShap INTERFACE ${GPUTreeShap_SOURCE_DIR}/GPUTreeShap/gpu_treeshap.h)
 target_include_directories(GPUTreeShap INTERFACE ${GPUTreeShap_SOURCE_DIR})
+target_link_libraries(GPUTreeShap INTERFACE CCCL::CCCL)
 
 set_property(TARGET GPUTreeShap PROPERTY CXX_STANDARD 17)
 set_property(TARGET GPUTreeShap PROPERTY CUDA_STANDARD 17)
 set(COMPILE_OPTIONS --expt-extended-lambda -lineinfo --Werror all-warnings)
 set(GCC_COMPILE_OPTIONS -Xcompiler -Werror,-Wall,-Wextra)
 
-if(BUILD_GTEST)
+if(GPUTREESHAP_BUILD_GTEST)
   include(${rapids-cmake-dir}/cpm/gtest.cmake)
   rapids_cpm_gtest()
 
@@ -69,7 +73,7 @@ if(BUILD_GTEST)
   target_link_libraries(TestGPUTreeShap PRIVATE GTest::gtest GTest::gtest_main)
 endif()
 
-if(BUILD_EXAMPLES)
+if(GPUTREESHAP_BUILD_EXAMPLES)
   add_executable(GPUTreeShapExample example/example.cu)
   target_link_libraries(GPUTreeShapExample PRIVATE GPUTreeShap)
   target_compile_options(GPUTreeShapExample PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${COMPILE_OPTIONS}>)
@@ -78,17 +82,17 @@ if(BUILD_EXAMPLES)
   endif()
 endif()
 
-if(BUILD_BENCHMARKS)
+if(GPUTREESHAP_BUILD_BENCHMARKS)
   include(${rapids-cmake-dir}/cpm/gbench.cmake)
   rapids_cpm_gbench()
 
   add_executable(BenchmarkGPUTreeShap benchmark/benchmark_gpu_treeshap.cu)
-  target_link_libraries(BenchmarkGPUTreeShap PRIVATE GPUTreeShap)
+  target_link_libraries(BenchmarkGPUTreeShap PRIVATE GPUTreeShap ${CMAKE_DL_LIBS})
   target_compile_options(BenchmarkGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>: ${COMPILE_OPTIONS}>)
   if(NOT MSVC)
     target_compile_options(BenchmarkGPUTreeShap PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${GCC_COMPILE_OPTIONS}>)
   endif()
-  target_link_libraries(BenchmarkGPUTreeShap  PRIVATE benchmark::benchmark)
+  target_link_libraries(BenchmarkGPUTreeShap PRIVATE benchmark::benchmark)
 endif()
 
 include(cmake/doxygen.cmake)
