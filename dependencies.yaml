@@ -59,6 +59,7 @@ dependencies:
               arch: aarch64
               cuda: "12.*"
             packages:
+              - gcc_linux-aarch64=13.*
               - gxx_linux-aarch64=13.*
               - cuda-nvcc
   checks:
