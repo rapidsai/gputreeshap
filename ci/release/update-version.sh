@@ -30,11 +30,11 @@ function sed_runner() {
     sed -i.bak ''"$1"'' $2 && rm -f ${2}.bak
 }
 
+# Centralized version file update
+echo "${NEXT_FULL_TAG}" > VERSION
+
 # CMakeLists
 sed_runner 's/'"GPUTreeShap VERSION .* LANGUAGES"'/'"GPUTreeShap VERSION ${NEXT_FULL_TAG} LANGUAGES"'/g' CMakeLists.txt
-
-# rapids-cmake version
-sed_runner 's/'"branch-.*\/RAPIDS.cmake"'/'"branch-${NEXT_SHORT_TAG}\/RAPIDS.cmake"'/g' fetch_rapids.cmake
 
 # Update project_number (RAPIDS_VERSION) in the CPP doxygen file
 sed_runner "s/\(PROJECT_NUMBER.*=\).*/\1 \"${NEXT_SHORT_TAG}\"/g" Doxyfile.in

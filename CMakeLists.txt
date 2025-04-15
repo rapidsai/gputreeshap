@@ -16,9 +16,7 @@
 
 cmake_minimum_required(VERSION 3.30.4 FATAL_ERROR)
 
-include(FetchContent)
-
-include(fetch_rapids.cmake)
+include(cmake/rapids_config.cmake)
 
 include(rapids-cmake)
 include(rapids-cpm)
@@ -28,7 +26,7 @@ include(rapids-find)
 
 rapids_cuda_init_architectures(GPUTreeShap)
 
-project(GPUTreeShap VERSION 25.04.00 LANGUAGES CXX CUDA)
+project(GPUTreeShap VERSION 25.06.00 LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 
