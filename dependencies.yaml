@@ -20,6 +20,7 @@ dependencies:
       - output_types: conda
         packages:
           - cmake
+          - cuda-nvcc
           - make
     specific:
       - output_types: conda
@@ -42,7 +43,6 @@ dependencies:
               # CUDA 12.4+ supports gcc 13.
               - gcc_linux-64=12.*
               - gxx_linux-64=12.*
-              - cuda-nvcc
           - matrix:
               arch: aarch64
               cuda: "12.*"
@@ -51,7 +51,18 @@ dependencies:
               # CUDA 12.4+ supports gcc 13.
               - gcc_linux-aarch64=12.*
               - gxx_linux-aarch64=12.*
-              - cuda-nvcc
+          - matrix:
+              arch: x86_64
+              cuda: "13.*"
+            packages:
+              - gcc_linux-64=14.*
+              - gxx_linux-64=14.*
+          - matrix:
+              arch: aarch64
+              cuda: "13.*"
+            packages:
+              - gcc_linux-aarch64=14.*
+              - gxx_linux-aarch64=14.*
   checks:
     common:
       - output_types: [conda, requirements]
@@ -81,14 +92,16 @@ dependencies:
               cuda: "12.9"
             packages:
               - cuda-version=12.9
-  cuda:
-    specific:
-      - output_types: conda
-        matrices:
           - matrix:
-              cuda: "12.*"
+              cuda: "13.0"
             packages:
-              - cuda-cudart-dev
+              - cuda-version=13.0
+  cuda:
+    common:
+      - output_types: conda
+        packages:
+          - cuda-cudart-dev
+
   docs:
     common:
       - output_types: conda

@@ -2,7 +2,7 @@
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -12,12 +12,12 @@ repos:
       - id: cpplint
         args: ["--recursive"]
   - repo: https://github.com/rapidsai/pre-commit-hooks
-    rev: v0.6.0
+    rev: v0.7.0
     hooks:
       - id: verify-copyright
         args: ["--fix", "--main-branch", "main"]
   - repo: https://github.com/rapidsai/dependency-file-generator
-    rev: v1.19.0
+    rev: v1.19.2
     hooks:
       - id: rapids-dependency-file-generator
         args: ["--clean"]
