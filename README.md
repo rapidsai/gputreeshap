@@ -15,7 +15,7 @@ See the associated publication [here](https://arxiv.org/abs/2010.13972)
 ```
 
 ## Using GPUTreeShap
-GPUTreeShap is integrated with XGBoost 1.3 onwards, [see here for details](https://xgboost.readthedocs.io/en/latest/gpu/index.html#gpu-accelerated-shap-values) and [here for a demo notebook](https://github.com/dmlc/xgboost/blob/master/demo/gpu_acceleration/shap.ipynb).
+GPUTreeShap is integrated with XGBoost 1.3 onwards, [see here for details](https://xgboost.readthedocs.io/en/latest/gpu/index.html#gpu-accelerated-shap-values) and [here for a demo ](https://github.com/dmlc/xgboost/blob/master/demo/guide-python/gpu_tree_shap.py).
 
 GPUTreeShap is integrated with the [python shap package](https://shap.readthedocs.io/en/latest/generated/shap.explainers.GPUTree.html#shap.explainers.GPUTree).
 
