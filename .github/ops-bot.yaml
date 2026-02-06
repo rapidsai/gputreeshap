@@ -6,4 +6,4 @@ branch_checker: false
 label_checker: false
 release_drafter: false
 forward_merger: false
-merge_barriers: false
+merge_barriers: true
