@@ -9,7 +9,7 @@
 #
 # Where <new_version> is a RAPIDS version, like '26.06.00'.
 
-set -e -o -u pipefail
+set -e -u -o pipefail
 
 # Parse command line arguments
 CLI_RUN_CONTEXT=""
@@ -36,7 +36,7 @@ NEXT_FULL_TAG="$VERSION_ARG"
 if [[ -n "$CLI_RUN_CONTEXT" ]]; then
     RUN_CONTEXT="$CLI_RUN_CONTEXT"
     echo "Using run-context from CLI: $RUN_CONTEXT"
-elif [[ -n "${RAPIDS_RUN_CONTEXT}" ]]; then
+elif [[ -n "${RAPIDS_RUN_CONTEXT:-}" ]]; then
     RUN_CONTEXT="$RAPIDS_RUN_CONTEXT"
     echo "Using run-context from environment: $RUN_CONTEXT"
 else
@@ -68,7 +68,6 @@ NEXT_MAJOR=$(echo "${NEXT_FULL_TAG}" | awk '{split($0, a, "."); print a[1]}')
 NEXT_MINOR=$(echo "${NEXT_FULL_TAG}" | awk '{split($0, a, "."); print a[2]}')
 NEXT_SHORT_TAG=${NEXT_MAJOR}.${NEXT_MINOR}
 
-
 # Set branch references based on RUN_CONTEXT
 if [[ "${RUN_CONTEXT}" == "main" ]]; then
     RAPIDS_BRANCH_NAME="main"
@@ -87,12 +86,12 @@ function sed_runner() {
 echo "${RAPIDS_BRANCH_NAME}" > RAPIDS_BRANCH
 
 # Centralized version file update
-echo "${NEXT_FULL_TAG}" > VERSION
+echo "${NEXT_FULL_TAG}" > RAPIDS_VERSION
 
 # CMakeLists
 sed_runner 's/'"GPUTreeShap VERSION .* LANGUAGES"'/'"GPUTreeShap VERSION ${NEXT_FULL_TAG} LANGUAGES"'/g' CMakeLists.txt
 
 # CI files
-for FILE in .github/workflows/*.yaml .github/workflows/*.yml; do
+for FILE in .github/workflows/*.yaml; do
   sed_runner "/shared-workflows/ s|@.*|@${RAPIDS_BRANCH_NAME}|g" "${FILE}"
 done
