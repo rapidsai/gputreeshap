@@ -20,6 +20,9 @@ repos:
     hooks:
       - id: verify-copyright
         args: ["--fix", "--main-branch", "main"]
+      - id: verify-hardcoded-version
+        name: verify-hardcoded-version-rapids
+        args: [--fix, --version-file=RAPIDS_VERSION]
   - repo: https://github.com/rapidsai/dependency-file-generator
     rev: v1.20.2
     hooks:
