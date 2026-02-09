@@ -22,6 +22,7 @@ jobs:
     with:
       enable_check_generated_files: false
       enable_check_version_files_changed: false
+      enable_check_version_against_tag: false
   cpp-build-test:
     needs: checks
     secrets: inherit
