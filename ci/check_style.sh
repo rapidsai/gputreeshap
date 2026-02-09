@@ -1,9 +1,11 @@
 #!/bin/bash
-# Copyright (c) 2023-2024, NVIDIA CORPORATION.
+# Copyright (c) 2023-2026, NVIDIA CORPORATION.
 
 set -euo pipefail
 
 rapids-logger "Create checks conda environment"
+
+# shellcheck disable=SC1091
 . /opt/conda/etc/profile.d/conda.sh
 
 ENV_YAML_DIR="$(mktemp -d)"

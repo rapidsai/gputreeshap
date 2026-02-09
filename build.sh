@@ -1,13 +1,14 @@
 #!/bin/bash
-# Copyright (c) 2022-2025, NVIDIA CORPORATION.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION.
 set -euo pipefail
 
-mkdir -p build
-cd build
-cmake .. \
+cmake -B build -S . \
     -DCMAKE_BUILD_TYPE=Release \
     -DGPUTREESHAP_BUILD_GTEST=ON \
     -DGPUTREESHAP_BUILD_EXAMPLES=ON \
     -DGPUTREESHAP_BUILD_BENCHMARKS=ON
-make -j4
-cmake --build . --target docs_gputreeshap
+
+cmake --build build -j4
+
+RAPIDS_VERSION_MAJOR_MINOR=$(cat ./RAPIDS_VERSION) \
+    cmake --build . --target docs_gputreeshap

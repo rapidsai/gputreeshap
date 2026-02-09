@@ -1,5 +1,5 @@
 #=============================================================================
-# Copyright (c) 2020-2025, NVIDIA CORPORATION.
+# Copyright (c) 2020-2026, NVIDIA CORPORATION.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,7 +26,11 @@ include(rapids-find)
 
 rapids_cuda_init_architectures(GPUTreeShap)
 
-project(GPUTreeShap VERSION 25.10.00 LANGUAGES CXX CUDA)
+project(
+  GPUTreeShap
+  VERSION "${RAPIDS_VERSION}"
+  LANGUAGES CXX CUDA
+)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 

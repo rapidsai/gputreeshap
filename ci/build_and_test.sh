@@ -1,6 +1,8 @@
 #!/bin/bash
-# Copyright (c) 2023-2024, NVIDIA CORPORATION.
+# Copyright (c) 2023-2026, NVIDIA CORPORATION.
 set -euo pipefail
+
+# shellcheck disable=SC1091
 . /opt/conda/etc/profile.d/conda.sh
 
 rapids-logger "Generate C++ build & test dependencies"
