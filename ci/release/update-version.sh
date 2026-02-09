@@ -7,7 +7,7 @@
 ## Usage
 # bash update-version.sh <new_version>
 #
-# Where <usage> is a RAPIDS version, like '26.06.00'.
+# Where <new_version> is a RAPIDS version, like '26.06.00'.
 
 set -e -o -u pipefail
 
@@ -95,4 +95,4 @@ sed_runner 's/'"GPUTreeShap VERSION .* LANGUAGES"'/'"GPUTreeShap VERSION ${NEXT_
 # CI files
 for FILE in .github/workflows/*.yaml .github/workflows/*.yml; do
   sed_runner "/shared-workflows/ s|@.*|@${RAPIDS_BRANCH_NAME}|g" "${FILE}"
-fi
+done
