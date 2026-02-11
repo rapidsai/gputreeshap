@@ -835,7 +835,7 @@ void GetBinSegments(const PathVectorT& paths, const SizeVectorT& bin_map,
   DeviceAllocatorT alloc;
   size_t num_bins =
       thrust::reduce(thrust::cuda::par(alloc), bin_map.begin(), bin_map.end(),
-                     size_t(0), thrust::maximum<size_t>()) +
+                     size_t(0), cuda::maximum<size_t>()) +
       1;
   bin_segments->resize(num_bins + 1, 0);
   auto counting = thrust::make_counting_iterator(0llu);

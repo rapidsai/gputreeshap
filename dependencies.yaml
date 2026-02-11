@@ -32,13 +32,37 @@ dependencies:
           - matrix:
               arch: x86_64
             packages:
-              - gcc_linux-64=14.*
               - sysroot_linux-64==2.28
           - matrix:
               arch: aarch64
             packages:
-              - gcc_linux-aarch64=14.*
               - sysroot_linux-aarch64==2.28
+      - output_types: conda
+        matrices:
+          # We use gcc 12 here to ensure compatibility with CUDA 12.0.
+          # CUDA 12.4+ supports gcc 13.
+          - matrix:
+              arch: x86_64
+              cuda: "12.[0123]"
+            packages:
+              - gcc_linux-64=12.*
+              - gxx_linux-64=12.*
+          - matrix:
+              arch: aarch64
+              cuda: "12.[0123]"
+            packages:
+              - gcc_linux-aarch64=12.*
+              - gxx_linux-aarch64=12.*
+          # If the above matrices didn't get matched, use the same compilers as cuML
+          # (which always builds on the latest CUDA minor version within each major version).
+          - matrix:
+              arch: x86_64
+            packages:
+              - gcc_linux-64=14.*
+          - matrix:
+              arch: aarch64
+            packages:
+              - gcc_linux-aarch64=14.*
   checks:
     common:
       - output_types: [conda, requirements]
