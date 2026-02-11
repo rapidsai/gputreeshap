@@ -3,6 +3,7 @@
 set -euo pipefail
 
 cmake -B build -S . \
+    -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DGPUTREESHAP_BUILD_GTEST=ON \
     -DGPUTREESHAP_BUILD_EXAMPLES=ON \
