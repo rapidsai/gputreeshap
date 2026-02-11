@@ -11,6 +11,10 @@ repos:
     hooks:
       - id: cpplint
         args: ["--recursive"]
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
   - repo: https://github.com/rapidsai/pre-commit-hooks
     rev: v0.7.0
     hooks:

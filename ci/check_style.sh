@@ -4,6 +4,8 @@
 set -euo pipefail
 
 rapids-logger "Create checks conda environment"
+
+# shellcheck disable=SC1091
 . /opt/conda/etc/profile.d/conda.sh
 
 ENV_YAML_DIR="$(mktemp -d)"
