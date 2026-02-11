@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2024, NVIDIA CORPORATION.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1183,7 +1183,7 @@ void ComputeBias(const PathVectorT& device_paths, DoubleVectorT* bias) {
   auto combined_out = thrust::reduce_by_key(
       thrust::cuda::par(alloc), path_key, path_key + sorted_paths.size(),
       sorted_paths.begin(), thrust::make_discard_iterator(), combined.begin(),
-      thrust::equal_to<size_t>(),
+      cuda::std::equal_to<size_t>(),
       [=] __device__(PathElement<SplitConditionT> a,
                      const PathElement<SplitConditionT>& b) {
         a.zero_fraction *= b.zero_fraction;
