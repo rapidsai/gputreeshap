@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2024, NVIDIA CORPORATION.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,9 @@
  */
 
 #pragma once
+
+#include <cuda/functional>
+#include <cuda/std/utility>
 
 #include <thrust/copy.h>
 #include <thrust/device_allocator.h>
@@ -835,7 +838,7 @@ void GetBinSegments(const PathVectorT& paths, const SizeVectorT& bin_map,
   DeviceAllocatorT alloc;
   size_t num_bins =
       thrust::reduce(thrust::cuda::par(alloc), bin_map.begin(), bin_map.end(),
-                     size_t(0), thrust::maximum<size_t>()) +
+                     size_t(0), cuda::maximum<size_t>()) +
       1;
   bin_segments->resize(num_bins + 1, 0);
   auto counting = thrust::make_counting_iterator(0llu);
@@ -1183,7 +1186,7 @@ void ComputeBias(const PathVectorT& device_paths, DoubleVectorT* bias) {
   auto combined_out = thrust::reduce_by_key(
       thrust::cuda::par(alloc), path_key, path_key + sorted_paths.size(),
       sorted_paths.begin(), thrust::make_discard_iterator(), combined.begin(),
-      thrust::equal_to<size_t>(),
+      cuda::std::equal_to<size_t>(),
       [=] __device__(PathElement<SplitConditionT> a,
                      const PathElement<SplitConditionT>& b) {
         a.zero_fraction *= b.zero_fraction;

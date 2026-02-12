@@ -11,13 +11,20 @@ repos:
     hooks:
       - id: cpplint
         args: ["--recursive"]
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
   - repo: https://github.com/rapidsai/pre-commit-hooks
-    rev: v0.7.0
+    rev: v1.4.3
     hooks:
       - id: verify-copyright
         args: ["--fix", "--main-branch", "main"]
+      - id: verify-hardcoded-version
+        name: verify-hardcoded-version-rapids
+        args: [--fix, --version-file=RAPIDS_VERSION]
   - repo: https://github.com/rapidsai/dependency-file-generator
-    rev: v1.19.2
+    rev: v1.20.2
     hooks:
       - id: rapids-dependency-file-generator
         args: ["--clean"]

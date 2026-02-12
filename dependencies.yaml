@@ -17,11 +17,15 @@ channels:
 dependencies:
   build:
     common:
+      - output_types: [conda, requirements, pyproject]
+        packages:
+          - cmake>=3.30.4
+          - ninja
       - output_types: conda
         packages:
-          - cmake
+          - c-compiler
           - cuda-nvcc
-          - make
+          - cxx-compiler
     specific:
       - output_types: conda
         matrices:
@@ -35,34 +39,30 @@ dependencies:
               - sysroot_linux-aarch64==2.28
       - output_types: conda
         matrices:
+          # We use gcc 12 here to ensure compatibility with CUDA 12.0.
+          # CUDA 12.4+ supports gcc 13.
           - matrix:
               arch: x86_64
-              cuda: "12.*"
+              cuda: "12.[0123]"
             packages:
-              # We use gcc 12 here to ensure compatibility with CUDA 12.0.
-              # CUDA 12.4+ supports gcc 13.
               - gcc_linux-64=12.*
               - gxx_linux-64=12.*
           - matrix:
               arch: aarch64
-              cuda: "12.*"
+              cuda: "12.[0123]"
             packages:
-              # We use gcc 12 here to ensure compatibility with CUDA 12.0.
-              # CUDA 12.4+ supports gcc 13.
               - gcc_linux-aarch64=12.*
               - gxx_linux-aarch64=12.*
+          # If the above matrices didn't get matched, use the same compilers as cuML
+          # (which always builds on the latest CUDA minor version within each major version).
           - matrix:
               arch: x86_64
-              cuda: "13.*"
             packages:
               - gcc_linux-64=14.*
-              - gxx_linux-64=14.*
           - matrix:
               arch: aarch64
-              cuda: "13.*"
             packages:
               - gcc_linux-aarch64=14.*
-              - gxx_linux-aarch64=14.*
   checks:
     common:
       - output_types: [conda, requirements]
@@ -96,6 +96,10 @@ dependencies:
               cuda: "13.0"
             packages:
               - cuda-version=13.0
+          - matrix:
+              cuda: "13.1"
+            packages:
+              - cuda-version=13.1
   cuda:
     common:
       - output_types: conda
