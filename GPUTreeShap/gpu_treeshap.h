@@ -16,6 +16,9 @@
 
 #pragma once
 
+#include <cuda/functional>
+#include <cuda/std/utility>
+
 #include <thrust/copy.h>
 #include <thrust/device_allocator.h>
 #include <thrust/device_vector.h>
