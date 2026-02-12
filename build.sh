@@ -12,4 +12,4 @@ cmake -B build -S . \
 cmake --build build -j4
 
 RAPIDS_VERSION_MAJOR_MINOR=$(cat ./RAPIDS_VERSION) \
-    cmake --build . --target docs_gputreeshap
+    cmake --build build --target docs_gputreeshap
