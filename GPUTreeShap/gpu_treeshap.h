@@ -105,7 +105,7 @@ struct PathElement {
         zero_fraction(zero_fraction),
         v(v) {}
 
-  __host__ __device__ PathElement() = default;
+  __host__ __device__ PathElement() {}
   __host__ __device__ bool IsRoot() const { return feature_idx == -1; }
 
   template <typename DatasetT>
