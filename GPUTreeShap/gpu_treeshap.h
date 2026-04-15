@@ -105,7 +105,7 @@ struct PathElement {
         zero_fraction(zero_fraction),
         v(v) {}
 
-  PathElement() = default;
+  __host__ __device__ PathElement() = default;
   __host__ __device__ bool IsRoot() const { return feature_idx == -1; }
 
   template <typename DatasetT>
@@ -462,7 +462,10 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
                const PathElement<SplitConditionT>* path_elements,
                const size_t* bin_segments, size_t num_groups, double* phis) {
   // Use shared memory for structs, otherwise nvcc puts in local memory
-  __shared__ PathElement<SplitConditionT> s_elements[kBlockSize];
+  __shared__ __align__(alignof(PathElement<SplitConditionT>)) char
+      s_elements_storage[sizeof(PathElement<SplitConditionT>) * kBlockSize];
+  auto* s_elements =
+      reinterpret_cast<PathElement<SplitConditionT>*>(s_elements_storage);
   PathElement<SplitConditionT>& e = s_elements[threadIdx.x];
 
   size_t start_row, end_row;
@@ -565,7 +568,10 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
                            const size_t* bin_segments, size_t num_groups,
                            double* phis_interactions) {
   // Use shared memory for structs, otherwise nvcc puts in local memory
-  __shared__ PathElement<SplitConditionT> s_elements[kBlockSize];
+  __shared__ __align__(alignof(PathElement<SplitConditionT>)) char
+      s_elements_storage[sizeof(PathElement<SplitConditionT>) * kBlockSize];
+  auto* s_elements =
+      reinterpret_cast<PathElement<SplitConditionT>*>(s_elements_storage);
   PathElement<SplitConditionT>* e = &s_elements[threadIdx.x];
 
   size_t start_row, end_row;
@@ -646,7 +652,10 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
     s_X = X;
   }
   __syncthreads();
-  __shared__ PathElement<SplitConditionT> s_elements[kBlockSize];
+  __shared__ __align__(alignof(PathElement<SplitConditionT>)) char
+      s_elements_storage[sizeof(PathElement<SplitConditionT>) * kBlockSize];
+  auto* s_elements =
+      reinterpret_cast<PathElement<SplitConditionT>*>(s_elements_storage);
   PathElement<SplitConditionT>* e = &s_elements[threadIdx.x];
 
   size_t start_row, end_row;
@@ -756,7 +765,10 @@ __global__ void __launch_bounds__(GPUTREESHAP_MAX_THREADS_PER_BLOCK)
 
   __syncthreads();
 
-  __shared__ PathElement<SplitConditionT> s_elements[kBlockSize];
+  __shared__ __align__(alignof(PathElement<SplitConditionT>)) char
+      s_elements_storage[sizeof(PathElement<SplitConditionT>) * kBlockSize];
+  auto* s_elements =
+      reinterpret_cast<PathElement<SplitConditionT>*>(s_elements_storage);
   PathElement<SplitConditionT>& e = s_elements[threadIdx.x];
 
   size_t start_row, end_row;
