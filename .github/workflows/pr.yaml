@@ -15,10 +15,10 @@ jobs:
       - checks
       - cpp-build-test
     secrets: inherit
-    uses: rapidsai/shared-workflows/.github/workflows/pr-builder.yaml@main
+    uses: rapidsai/shared-workflows/.github/workflows/pr-builder.yaml@cuda-13.2.0
   checks:
     secrets: inherit
-    uses: rapidsai/shared-workflows/.github/workflows/checks.yaml@main
+    uses: rapidsai/shared-workflows/.github/workflows/checks.yaml@cuda-13.2.0
     with:
       enable_check_generated_files: false
       enable_check_version_files_changed: false
@@ -26,7 +26,7 @@ jobs:
   cpp-build-test:
     needs: checks
     secrets: inherit
-    uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-tests.yaml@main
+    uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-tests.yaml@cuda-13.2.0
     with:
       build_type: pull-request
       script: ci/build_and_test.sh
