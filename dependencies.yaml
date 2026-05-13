@@ -19,7 +19,7 @@ dependencies:
     common:
       - output_types: [conda, requirements, pyproject]
         packages:
-          - cmake>=3.30.4
+          - cmake>=4.0
           - ninja
       - output_types: conda
         packages:
