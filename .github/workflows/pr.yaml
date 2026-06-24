@@ -13,7 +13,7 @@ jobs:
       - checks
       - cpp-build-test
     secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/pr-builder.yaml@cuda-13.3.0
+    uses: rapidsai/shared-workflows/.github/workflows/pr-builder.yaml@main
     permissions:
       actions: read
       contents: read
@@ -22,7 +22,7 @@ jobs:
       pull-requests: read
   checks:
     secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/checks.yaml@cuda-13.3.0
+    uses: rapidsai/shared-workflows/.github/workflows/checks.yaml@main
     with:
       enable_check_generated_files: false
       enable_check_version_files_changed: false
@@ -36,7 +36,7 @@ jobs:
   cpp-build-test:
     needs: checks
     secrets: inherit # zizmor: ignore[secrets-inherit]
-    uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-tests.yaml@cuda-13.3.0
+    uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-tests.yaml@main
     with:
       build_type: pull-request
       script: ci/build_and_test.sh
