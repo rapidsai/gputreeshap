@@ -28,10 +28,23 @@ repos:
     hooks:
       - id: rapids-dependency-file-generator
         args: ["--clean"]
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        additional_dependencies: [pyyaml]
+        exclude: |
+          (?x)^(
+            [.]github/labeler[.]yml$|
+            conda/environments/.*|
+            cpp/[.]clang-format$|
+            cpp/[.]clang-tidy$|
+            .*xfail\-.*yaml$
+          )
   - repo: https://github.com/zizmorcore/zizmor-pre-commit
     rev: v1.24.1
     hooks:
       - id: zizmor
 
 default_language_version:
-      python: python3
+  python: python3
