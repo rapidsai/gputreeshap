@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright (c) 2023-2026, NVIDIA CORPORATION.
+# Copyright (c) 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 ###############################
 # gputreeshap Version Updater #
 ###############################
@@ -7,6 +7,7 @@
 ## Usage
 # bash update-version.sh <new_version>
 #
+# rapids-pre-commit-hooks: disable-next-line[verify-hardcoded-version]
 # Where <new_version> is a RAPIDS version, like '26.06.00'.
 
 set -e -u -o pipefail
