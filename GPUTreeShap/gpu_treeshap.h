@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2026, NVIDIA CORPORATION.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@
 #include <thrust/system/cuda/error.h>
 #include <thrust/system_error.h>
 
-#include <cub/cub.cuh>
+#include <cub/device/device_reduce.cuh>
 
 #include <algorithm>
 #include <functional>
