@@ -40,6 +40,7 @@ jobs:
     with:
       build_type: pull-request
       script: ci/build_and_test.sh
+      matrix_type: cuda-13-4-pr,pull-request
     permissions:
       actions: read
       contents: read
