@@ -9,7 +9,6 @@ concurrency:
 permissions: {}
 jobs:
   pr-builder:
-    if: false
     needs:
       - checks
       - cpp-build-test
@@ -22,7 +21,6 @@ jobs:
       packages: read
       pull-requests: read
   checks:
-    if: false
     secrets: inherit # zizmor: ignore[secrets-inherit]
     uses: rapidsai/shared-workflows/.github/workflows/checks.yaml@main
     with:
@@ -36,12 +34,13 @@ jobs:
       packages: read
       pull-requests: read
   cpp-build-test:
+    needs: checks
     secrets: inherit # zizmor: ignore[secrets-inherit]
     uses: rapidsai/shared-workflows/.github/workflows/conda-cpp-tests.yaml@main
     with:
       build_type: pull-request
       script: ci/build_and_test.sh
-      matrix_type: wsl-pr
+      matrix_type: pull-request,wsl-pr
     permissions:
       actions: read
       contents: read
