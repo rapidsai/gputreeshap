@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2024, NVIDIA CORPORATION.
+ * Copyright (c) 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,8 @@
 #include <limits>
 #include <numeric>
 #include <random>
+#include <string>
+#include <tuple>
 #include <vector>
 #include "tests/test_utils.h"
 #include "../GPUTreeShap/gpu_treeshap.h"
@@ -176,12 +178,14 @@ INSTANTIATE_TEST_CASE_P(ShapInstantiation, ParameterisedModelTest,
                                          testing::ValuesIn(test_num_paths)),
                         PrintTestName);
 
+// NOLINTBEGIN(whitespace/newline)
 #define EXPECT_THROW_CONTAINS_MESSAGE(stmt, etype, whatstring)             \
   EXPECT_THROW(try { stmt; } catch (const etype& ex) {                     \
     EXPECT_NE(std::string(ex.what()).find(whatstring), std::string::npos); \
     throw;                                                                 \
   },                                                                       \
                etype)
+// NOLINTEND
 
 class APITest : public ::testing::Test {
  protected:
