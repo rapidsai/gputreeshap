@@ -11,6 +11,7 @@ files:
     output: none
     includes:
       - checks
+      - py_version
 channels:
   - rapidsai
   - conda-forge
@@ -123,3 +124,22 @@ dependencies:
       - output_types: conda
         packages:
           - doxygen
+  py_version:
+    specific:
+      - output_types: conda
+        matrices:
+          - matrix:
+              py: "3.12"
+            packages:
+              - python=3.12
+          - matrix:
+              py: "3.13"
+            packages:
+              - python=3.13
+          - matrix:
+              py: "3.14"
+            packages:
+              - python=3.14
+          - matrix:
+            packages:
+              - python>=3.12
